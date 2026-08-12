@@ -1,0 +1,1180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>对讲机组队功能 · 交互流程图</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+:root {
+  --accent: #00bebe;
+  --accent-2: #00D4D4;
+  --accent-soft: #D0F5F5;
+  --sage: #004b64;
+  --grad: linear-gradient(135deg, #00D4D4, #00bebe);
+  --ink-1: #1A1F1F;
+  --ink-2: #2E3D3D;
+  --ink-3: #5C7070;
+  --ink-4: #8AABAB;
+  --bg: #FFFFFF;
+  --bg-soft: #F0FAFA;
+  --line: #D8EEEE;
+  --line-2: #B8DEDE;
+  --shadow-card: 0 16px 34px -22px rgba(0,60,70,0.15);
+  --shadow-em: 0 24px 50px -32px rgba(0,60,70,0.18);
+  --glow: 0 0 0 4px rgba(0,190,190,0.15);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  color: var(--ink-2);
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ---------- Header ---------- */
+.header {
+  position: relative;
+  background: linear-gradient(135deg, #00323F 0%, #004b64 55%, #007D8C 100%);
+  padding: 20px 32px 22px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.header .glow {
+  position: absolute;
+  right: -60px;
+  top: -80px;
+  width: 320px;
+  height: 320px;
+  background: radial-gradient(circle, rgba(0,212,212,.22), transparent 65%);
+  pointer-events: none;
+}
+.header h1 { color: #fff; font-size: 21px; font-weight: 700; letter-spacing: .5px; }
+.header h1 em { font-style: normal; color: #00D4D4; }
+.header .subtitle { margin-top: 7px; font-size: 12px; color: rgba(255,255,255,.75); line-height: 1.7; }
+.header .subtitle code {
+  background: rgba(0,212,212,.15);
+  color: #7FE8E8;
+  padding: 1px 7px;
+  border-radius: 5px;
+  font-family: inherit;
+  font-size: 11.5px;
+}
+
+/* ---------- Tab bar / toolbar ---------- */
+.tab-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  background: #fff;
+  border-bottom: 1px solid var(--line);
+  padding: 9px 20px;
+  flex-shrink: 0;
+  z-index: 30;
+}
+.tabs { display: flex; gap: 4px; }
+.tab {
+  border: none;
+  background: transparent;
+  color: var(--ink-3);
+  font-size: 12.5px;
+  padding: 7px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all .15s;
+}
+.tab:hover { background: var(--bg-soft); }
+.tab.active {
+  background: var(--grad);
+  color: #fff;
+  box-shadow: 0 6px 14px -8px rgba(0,190,190,.6);
+}
+.tools { display: flex; gap: 7px; flex-wrap: wrap; }
+.btn {
+  border: 1px solid var(--line-2);
+  background: #fff;
+  color: var(--ink-2);
+  font-size: 12px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all .15s;
+}
+.btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.btn:disabled { opacity: .4; cursor: default; }
+.btn-primary {
+  background: var(--grad);
+  color: #fff;
+  border: 1px solid transparent;
+  box-shadow: 0 6px 14px -8px rgba(0,190,190,.55);
+}
+.btn-primary:hover:not(:disabled) { color: #fff; filter: brightness(1.05); border-color: transparent; }
+.btn-danger { color: #D14545; }
+.btn-danger:hover:not(:disabled) { border-color: #D14545; color: #D14545; }
+
+/* ---------- Legend ---------- */
+.legend-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  background: var(--bg-soft);
+  border-bottom: 1px solid var(--line);
+  padding: 8px 24px;
+  font-size: 12px;
+  color: var(--ink-3);
+  flex-shrink: 0;
+}
+.lg-item { display: flex; align-items: center; gap: 6px; }
+.lg-swatch { width: 14px; height: 14px; border-radius: 4px; border: 1.5px solid; }
+.lg-hint { margin-left: auto; color: var(--ink-4); font-size: 11px; }
+
+/* ---------- Layout ---------- */
+.layout { flex: 1; display: flex; min-height: 0; }
+.left-content { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.view { display: none; flex: 1; min-height: 0; overflow: auto; }
+.view.active { display: block; }
+.view[data-view="flow"].active { display: flex; flex-direction: column; overflow: hidden; }
+
+/* ---------- Mermaid viewport ---------- */
+#viewport {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  background-color: #FDFFFF;
+  background-image:
+    linear-gradient(var(--line) 0.5px, transparent 0.5px),
+    linear-gradient(90deg, var(--line) 0.5px, transparent 0.5px);
+  background-size: 24px 24px;
+}
+#viewport.dragging { cursor: grabbing; }
+#stage { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+#stage svg { display: block; max-width: none !important; width: auto !important; height: auto !important; }
+#stage .node { cursor: pointer; }
+#stage .node:hover { filter: brightness(0.97); }
+.render-err { padding: 40px; color: #D14545; font-size: 13px; max-width: 560px; line-height: 1.8; }
+
+.zoom-ctrl {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: #fff;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  padding: 4px 6px;
+  box-shadow: var(--shadow-card);
+  z-index: 5;
+}
+.zoom-ctrl button {
+  border: none;
+  background: transparent;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  color: var(--ink-2);
+  cursor: pointer;
+  font-size: 14px;
+  font-family: inherit;
+}
+.zoom-ctrl button:hover { background: var(--bg-soft); color: var(--accent); }
+#z-val { font-size: 11px; color: var(--ink-3); min-width: 42px; text-align: center; }
+.zoom-ctrl .sep { width: 1px; height: 16px; background: var(--line-2); margin: 0 4px; }
+
+/* ---------- Detail panel ---------- */
+.detail-panel {
+  width: 500px;
+  flex-shrink: 0;
+  background: #FAFAFC;
+  border-left: 1px solid var(--line);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+.detail-panel::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 2px;
+  background: var(--grad);
+  z-index: 1;
+}
+.panel-scroll { flex: 1; overflow-y: auto; padding: 24px 26px; }
+.p-empty {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: var(--ink-4);
+  font-size: 12.5px;
+  line-height: 2;
+}
+.p-tag {
+  display: inline-block;
+  font-size: 11px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid;
+  margin-bottom: 10px;
+}
+.p-title { font-size: 16px; font-weight: 700; color: var(--ink-1); margin-bottom: 4px; }
+.p-id { font-size: 11px; color: var(--ink-4); margin-bottom: 6px; }
+.p-h3 { font-size: 15px; font-weight: 700; color: var(--ink-1); margin: 18px 0 8px; }
+.p-content { font-size: 13px; color: var(--ink-2); line-height: 1.8; white-space: pre-wrap; }
+.p-actions { margin-top: 24px; display: flex; gap: 10px; }
+.p-form-title { font-size: 15px; font-weight: 700; color: var(--ink-1); margin-bottom: 16px; }
+.f-group { margin-bottom: 14px; }
+.f-group label { display: block; font-size: 12px; color: var(--ink-3); margin-bottom: 5px; }
+.f-group input, .f-group select, .f-group textarea {
+  width: 100%;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--ink-2);
+  background: #fff;
+  font-family: inherit;
+}
+.f-group textarea { min-height: 96px; resize: vertical; line-height: 1.7; }
+.f-group input:focus, .f-group select:focus, .f-group textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--glow);
+}
+.f-row { display: flex; gap: 10px; }
+.f-row .f-group { flex: 1; }
+
+/* ---------- Cards view ---------- */
+#cards { padding: 26px 30px; }
+.phase { margin-bottom: 32px; }
+.phase-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+.phase-num {
+  background: var(--grad);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 12px;
+  border-radius: 999px;
+  letter-spacing: .5px;
+  white-space: nowrap;
+}
+.phase-title { font-size: 15px; font-weight: 700; color: var(--ink-1); }
+.phase-hint { font-size: 12px; color: var(--ink-3); }
+.card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+.card {
+  position: relative;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px 14px 16px;
+  box-shadow: var(--shadow-card);
+  cursor: pointer;
+  transition: transform .15s, box-shadow .15s;
+  overflow: hidden;
+}
+.card::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 3px;
+  background: var(--grad);
+  opacity: 0;
+  transition: opacity .18s;
+}
+.card:hover { transform: translateY(-1px); box-shadow: var(--shadow-em); }
+.card:hover::after { opacity: 1; }
+.tag-chip {
+  display: inline-block;
+  font-size: 10.5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid;
+  margin-bottom: 8px;
+}
+.card-title { font-size: 13.5px; font-weight: 700; color: var(--ink-1); margin-bottom: 5px; }
+.card-purpose {
+  font-size: 12px;
+  color: var(--ink-3);
+  line-height: 1.6;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ---------- Edges view ---------- */
+#edges-wrap { padding: 26px 30px; }
+.edge-card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+.edge-card table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.edge-card th {
+  background: var(--bg-soft);
+  color: var(--ink-3);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  padding: 10px 12px;
+}
+.edge-card td { padding: 8px 12px; border-top: 1px solid var(--line); }
+.edge-card td select, .edge-card td input {
+  width: 100%;
+  border: 1px solid var(--line-2);
+  border-radius: 7px;
+  padding: 6px 8px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  background: #fff;
+  font-family: inherit;
+}
+.edge-card td select:focus, .edge-card td input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--glow);
+}
+.arrow { color: var(--ink-4); font-family: monospace; white-space: nowrap; font-size: 12px; }
+.edge-del { color: #D14545; background: none; border: none; cursor: pointer; font-size: 12px; font-family: inherit; }
+.edge-del:hover { text-decoration: underline; }
+.edge-add-row { margin-top: 14px; }
+.edges-note { margin-top: 12px; font-size: 11.5px; color: var(--ink-4); line-height: 1.8; }
+
+/* ---------- Footer ---------- */
+.page-footer {
+  flex-shrink: 0;
+  text-align: center;
+  padding: 10px 0 12px;
+  font-size: 9.5px;
+  color: var(--ink-4);
+  border-top: 1px solid var(--line);
+  background: #fff;
+}
+.page-footer .marker { width: 56px; height: 2px; background: var(--grad); margin: 0 auto 7px; }
+</style>
+</head>
+<body>
+
+<header class="header">
+  <div class="glow"></div>
+  <h1>对讲机组队功能 · <em>交互流程全景图</em></h1>
+  <div class="subtitle">
+    购买连接 / 组队共享 / 在线对讲 / <code>场景 1</code> 无网硬件对讲 / <code>场景 2</code> 非本品牌车加入
+    &nbsp;——&nbsp; 单击节点查看详情，双击节点直接编辑；基于《对讲机组队功能及无网场景解决方案介绍》（2026-07-31）
+  </div>
+</header>
+
+<div class="tab-bar">
+  <div class="tabs">
+    <button class="tab active" data-view="flow">📊 流程图</button>
+    <button class="tab" data-view="cards">📋 分阶段卡片</button>
+    <button class="tab" data-view="edges">🔗 连线管理</button>
+  </div>
+  <div class="tools">
+    <button id="btn-add" class="btn btn-primary">＋ 新增节点</button>
+    <button id="btn-undo" class="btn" disabled>↶ 撤销</button>
+    <button id="btn-redo" class="btn" disabled>↷ 重做</button>
+    <button id="btn-export-mmd" class="btn">导出 Mermaid</button>
+    <button id="btn-export-json" class="btn">导出 JSON</button>
+    <button id="btn-reset" class="btn btn-danger">重置</button>
+  </div>
+</div>
+
+<div class="legend-bar" id="legend"></div>
+
+<div class="layout">
+  <div class="left-content">
+    <div class="view active" data-view="flow">
+      <div id="viewport">
+        <div id="stage"></div>
+        <div class="zoom-ctrl">
+          <button id="z-out" title="缩小 (−)">−</button>
+          <span id="z-val">100%</span>
+          <button id="z-in" title="放大 (+)">＋</button>
+          <span class="sep"></span>
+          <button id="z-fit" title="适应屏幕 (F)">⤢</button>
+          <button id="z-reset" title="复位 100% (0)">⟲</button>
+        </div>
+      </div>
+    </div>
+    <div class="view" data-view="cards"><div id="cards"></div></div>
+    <div class="view" data-view="edges"><div id="edges-wrap"></div></div>
+  </div>
+  <aside class="detail-panel">
+    <div class="panel-scroll" id="panel"></div>
+  </aside>
+</div>
+
+<footer class="page-footer">
+  <div class="marker"></div>
+  对讲机组队功能交互流程 · 2026-08 · 本页面可直接编辑（双击节点改文字 / 工具栏增删节点 / 连线管理改连线），修改自动保存于浏览器本地
+</footer>
+
+<script>
+/* =============================================================
+   分类色板（NIOFlow 设计系统）
+   ============================================================= */
+const TAGS = {
+  buy:      { label: '购买 / 硬件流转', border: '#D49922', fill: '#FBF1DA', text: '#4A3A10' },
+  bind:     { label: '连接 / 账号绑定', border: '#5D4DD4', fill: '#ECE9FB', text: '#2A2260' },
+  team:     { label: '组队 / 信息共享', border: '#00bebe', fill: '#D0F5F5', text: '#0B4A4A' },
+  talk:     { label: '在线对讲链路', border: '#3D8090', fill: '#E1EEF1', text: '#1F3E45' },
+  radio:    { label: '无网硬件对讲', border: '#004b64', fill: '#DEF0F4', text: '#00323F' },
+  decision: { label: '判断 / 分支', border: '#00AAAA', fill: '#FFFFFF', text: '#1A1F1F', shape: 'diamond', dashed: true }
+};
+
+/* =============================================================
+   初始数据模型（唯一事实源：图、卡片、连线表都由它生成）
+   ============================================================= */
+const INITIAL = {
+  nodes: {
+    BUY: {
+      title: '商城购买对讲机', tag: 'buy',
+      purpose: '用户在商城完成对讲机硬件的购买，获得组队通信的硬件基础。',
+      logic: '用户在商城下单购买对讲机。\n这是整个组队与无网通信方案的前置条件：后续的车机连接、无网硬件对讲（场景 1）、转交朋友使用（场景 2）都以拿到这台硬件为起点。'
+    },
+    PAIR: {
+      title: '车机连接对讲机', tag: 'bind',
+      purpose: '在车机上完成与对讲机硬件的连接配对。',
+      logic: '车机提供专门的连接页面。\n用户拿到对讲机后，在该页面完成与车机的连接；连接建立后才能发起组队。'
+    },
+    TEAM_START: {
+      title: '发起组队', tag: 'team',
+      purpose: '由用户发起，建立车与车之间的小队关系。',
+      logic: '标准的组队流程在两台车之间进行。\n连接建立后由用户发起组队，对方确认后小队关系成立。'
+    },
+    TEAM_DONE: {
+      title: '组队完成 · 上限50台', tag: 'team',
+      purpose: '小队关系建立，开启信息共享与语音对讲能力。',
+      logic: '组队完成后，小队成为信息共享与语音对讲的载体。\n队伍规模上限为 50 台车。'
+    },
+    SHARE: {
+      title: '小队信息共享', tag: 'team',
+      purpose: '队内实时共享位置与行程信息，方便互相观察。',
+      logic: '共享内容包括：\n① 实时定位\n② 车辆信息\n③ 导航目的地（方便观察队友车辆是否偏离路线）'
+    },
+    PTT: {
+      title: '方向盘按键对讲', tag: 'talk',
+      purpose: '提供「按下即说」的语音对讲入口。',
+      logic: '按下方向盘中间的按键即可开始讲话；讲完再次按下按键确认发送。'
+    },
+    NET_CHECK: {
+      title: '车辆当前是否有网络？', tag: 'decision',
+      purpose: '判定语音走在线云端链路，还是对讲机硬件链路。',
+      logic: '有网 → 走云端分发链路（在线对讲）。\n无网（网络信号复杂的地形）→ 进入场景 1：语音必须经对讲机硬件收发。\n这是组队模式目前最大的痛点：某台车断网后，就收不到其他人发送的信息。'
+    },
+    CLOUD: {
+      title: '云端分发语音', tag: 'talk',
+      purpose: '将语音消息实时分发给小队全部车辆。',
+      logic: '有网场景下，语音经网络上行，由云端向队内所有车辆实时推送。\n无网车辆若处于对讲机组网范围内，可经「有网车辆桥接组网」节点转发获得该语音（见场景 1）。'
+    },
+    ALL_RECV: {
+      title: '全队同时收听播放', tag: 'talk',
+      purpose: '小队所有车辆同时收到并播放这条语音。',
+      logic: '队伍中的所有车辆（上限 50 台）都能同时收到并播放该条语音。'
+    },
+    RADIO_SEND: {
+      title: '语音经对讲机硬件发出', tag: 'radio',
+      purpose: '让无网车辆仍然能对外发送语音。',
+      logic: '无网车辆没有网络上行通道，向外发送语音必须通过对讲机硬件、以无线电方式发出。\n由于是硬件对讲，发出的语音信号可以让通信范围内的其他车辆都接收到。'
+    },
+    RADIO_RECV: {
+      title: '5–8公里内硬件接收', tag: 'radio',
+      purpose: '让无网车辆通过硬件接收队友的语音。',
+      logic: '对讲机的基本通信能力为 5 到 8 公里。\n在该范围内完成组网后，无网车辆经对讲机硬件接收语音，完全不依赖蜂窝网络。'
+    },
+    BRIDGE: {
+      title: '有网车辆桥接组网', tag: 'radio',
+      purpose: '打通硬件链路与在线链路，延展队伍的通信距离。',
+      logic: '在 5–8 公里范围内，只要有一台车有网络，它就可以作为桥接节点。\n桥接节点逐段接力，可以形成一条很长的队伍链：范围内无网用户经硬件收到信号，桥接车辆再把语音带回在线链路。\n↩ 语音经桥接回到「云端分发语音」节点，继续向全队推送（为保持布局稳定，图中不画回边）。'
+    },
+    GIVE: {
+      title: '车主转交对讲机', tag: 'buy',
+      purpose: '让驾驶非本品牌车的同行朋友也能加入通信。',
+      logic: '场景 2：同行朋友的车不是本品牌车辆，不具备组队功能。\n车主可以把车上已有的对讲机硬件交给朋友使用。'
+    },
+    APP_BIND: {
+      title: '下载App绑定新账号', tag: 'bind',
+      purpose: '让这台对讲机具备独立身份，可以加入小队。',
+      logic: '朋友拿到对讲机后，需要下载 App 并绑定一个新的账号。\n绑定成功后，这台对讲机的角色就类似于一套车机系统。'
+    },
+    APP_JOIN: {
+      title: '以对讲机身份加入小队', tag: 'team',
+      purpose: '与车主建立组队关系。',
+      logic: '完成绑定的对讲机可以与车主形成组队关系，享受小队的通信能力。\n这样该功能就能服务于非全部由本品牌车辆组成的车队。'
+    },
+    APP_TALK: {
+      title: 'App远程对讲', tag: 'talk',
+      purpose: '非本品牌车的成员在有网时仍可远距离沟通。',
+      logic: '有网络时，朋友通过 App 与对讲机实现远距离通话，保证团队成员之间的远程沟通。\n注意：同伴的车辆没有集成对讲机硬件，场景 1 的无网通信对其不可用。'
+    }
+  },
+  edges: [
+    { from: 'BUY',        to: 'PAIR',       label: '',            style: 'solid'  },
+    { from: 'PAIR',       to: 'TEAM_START', label: '',            style: 'solid'  },
+    { from: 'TEAM_START', to: 'TEAM_DONE',  label: '两台车之间',  style: 'solid'  },
+    { from: 'TEAM_DONE',  to: 'SHARE',      label: '',            style: 'solid'  },
+    { from: 'TEAM_DONE',  to: 'PTT',        label: '',            style: 'solid'  },
+    { from: 'PTT',        to: 'NET_CHECK',  label: '',            style: 'solid'  },
+    { from: 'NET_CHECK',  to: 'CLOUD',      label: '有网',        style: 'solid'  },
+    { from: 'CLOUD',      to: 'ALL_RECV',   label: '',            style: 'solid'  },
+    { from: 'NET_CHECK',  to: 'RADIO_SEND', label: '无网 · 场景1', style: 'dotted' },
+    { from: 'RADIO_SEND', to: 'RADIO_RECV', label: '',            style: 'solid'  },
+    { from: 'RADIO_RECV', to: 'BRIDGE',     label: '范围内有一台车有网', style: 'solid' },
+    { from: 'BUY',        to: 'GIVE',       label: '场景2 · 朋友的车非本品牌', style: 'dotted' },
+    { from: 'GIVE',       to: 'APP_BIND',   label: '',            style: 'solid'  },
+    { from: 'APP_BIND',   to: 'APP_JOIN',   label: '',            style: 'solid'  },
+    { from: 'APP_JOIN',   to: 'APP_TALK',   label: '有网时',      style: 'solid'  }
+  ],
+  phases: [
+    { id: 'P1', num: '阶段 1', title: '购买与连接',        hint: '硬件到手，车机完成配对',            nodes: ['BUY', 'PAIR'] },
+    { id: 'P2', num: '阶段 2', title: '组队与信息共享',    hint: '两台车成队，位置与行程互见',        nodes: ['TEAM_START', 'TEAM_DONE', 'SHARE'] },
+    { id: 'P3', num: '阶段 3', title: '在线对讲',          hint: '方向盘一键讲话，全队同时收听',      nodes: ['PTT', 'NET_CHECK', 'CLOUD', 'ALL_RECV'] },
+    { id: 'P4', num: '场景 1', title: '无网硬件对讲',      hint: '5–8 公里组网，有网车辆桥接成链',    nodes: ['RADIO_SEND', 'RADIO_RECV', 'BRIDGE'] },
+    { id: 'P5', num: '场景 2', title: '非本品牌车加入',    hint: '对讲机化身车机，App 远程通话',      nodes: ['GIVE', 'APP_BIND', 'APP_JOIN', 'APP_TALK'] }
+  ]
+};
+
+/* =============================================================
+   全局状态
+   ============================================================= */
+const STORE_KEY = 'flow-explorer:walkie-talkie-team:v1';
+let state = null;
+let undoStack = [];
+let redoStack = [];
+let selected = null;
+let panelMode = 'empty';        // empty | view | edit | add
+let view = { s: 1, tx: 0, ty: 0, fitted: false };
+let renderSeq = 0;
+
+const $ = (id) => document.getElementById(id);
+const stage = $('stage');
+const viewport = $('viewport');
+const panel = $('panel');
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+function deepCopy(o) { return JSON.parse(JSON.stringify(o)); }
+function tagOf(n) { return TAGS[n.tag] || TAGS.team; }
+
+/* =============================================================
+   数据 → Mermaid 源码
+   ============================================================= */
+function sanitizeLabel(t) {
+  return String(t)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '’')
+    .replace(/#/g, '＃')
+    .replace(/</g, '＜')
+    .replace(/>/g, '＞')
+    .replace(/\|/g, '｜')
+    .replace(/[\[\]{}]/g, ' ')
+    .replace(/\n/g, ' ');
+}
+function wrapLabel(raw) {
+  const s = String(raw).replace(/\s+/g, ' ').trim();
+  const chunks = [];
+  if (s.length <= 14) { chunks.push(s); }
+  else { for (let i = 0; i < s.length; i += 12) chunks.push(s.slice(i, i + 12)); }
+  return chunks.map(sanitizeLabel).join('<br/>');
+}
+function nodeDecl(id, n, indent) {
+  const lbl = wrapLabel(n.title);
+  const shape = tagOf(n).shape === 'diamond' ? '{"' + lbl + '"}' : '["' + lbl + '"]';
+  return indent + id + shape;
+}
+function buildMermaid(st) {
+  const lines = ['flowchart TD'];
+  st.phases.forEach((p) => {
+    const ids = p.nodes.filter((id) => st.nodes[id]);
+    if (!ids.length) return;
+    lines.push('  subgraph ' + p.id + '["&nbsp;' + sanitizeLabel(p.num + ' · ' + p.title) + '&nbsp;"]');
+    lines.push('    direction TB');
+    ids.forEach((id) => lines.push(nodeDecl(id, st.nodes[id], '    ')));
+    lines.push('  end');
+  });
+  const inPhase = new Set(st.phases.flatMap((p) => p.nodes));
+  Object.keys(st.nodes).forEach((id) => {
+    if (!inPhase.has(id)) lines.push(nodeDecl(id, st.nodes[id], '  '));
+  });
+  st.edges.forEach((e) => {
+    if (!st.nodes[e.from] || !st.nodes[e.to]) return;
+    const lbl = e.label ? sanitizeLabel(e.label) : '';
+    if (e.style === 'dotted') {
+      lines.push(lbl
+        ? '  ' + e.from + ' -. ' + lbl.replace(/\./g, '·') + ' .-> ' + e.to
+        : '  ' + e.from + ' -.-> ' + e.to);
+    } else {
+      lines.push(lbl
+        ? '  ' + e.from + ' -->|' + lbl + '| ' + e.to
+        : '  ' + e.from + ' --> ' + e.to);
+    }
+  });
+  Object.entries(TAGS).forEach(([k, t]) => {
+    lines.push('  classDef ' + k + ' fill:' + t.fill + ',stroke:' + t.border + ',color:' + t.text +
+      ',stroke-width:1.5px' + (t.dashed ? ',stroke-dasharray:4 3' : ''));
+  });
+  Object.entries(st.nodes).forEach(([id, n]) => {
+    lines.push('  class ' + id + ' ' + (TAGS[n.tag] ? n.tag : 'team'));
+  });
+  return lines.join('\n');
+}
+
+/* =============================================================
+   渲染：流程图
+   ============================================================= */
+async function renderFlow() {
+  if (!window.mermaid) {
+    stage.style.transform = 'none';
+    stage.innerHTML = '<div class="render-err">Mermaid 库加载失败（无网络或 CDN 不可达）。流程图无法渲染，但「分阶段卡片」「连线管理」两个视图仍可正常使用。</div>';
+    return;
+  }
+  try {
+    const { svg } = await mermaid.render('graph-' + (++renderSeq), buildMermaid(state));
+    stage.innerHTML = svg;
+    const el = stage.querySelector('svg');
+    if (el && el.viewBox && el.viewBox.baseVal && el.viewBox.baseVal.width) {
+      el.setAttribute('width', el.viewBox.baseVal.width);
+      el.setAttribute('height', el.viewBox.baseVal.height);
+    }
+    bindNodeEvents();
+    if (!view.fitted) { fitToScreen(); view.fitted = true; }
+    else applyTransform();
+  } catch (err) {
+    stage.style.transform = 'none';
+    stage.innerHTML = '<div class="render-err">流程图渲染失败：' + escapeHtml(err && err.message ? err.message : err) + '</div>';
+  }
+}
+function bindNodeEvents() {
+  stage.querySelectorAll('.node').forEach((el) => {
+    const m = /^flowchart-(.+?)-\d+$/.exec(el.id || '');
+    if (!m || !state.nodes[m[1]]) return;
+    const nid = m[1];
+    el.addEventListener('click', (e) => {
+      if (dragMoved) return;
+      e.stopPropagation();
+      showDetail(nid);
+    });
+    el.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      openEdit(nid);
+    });
+  });
+}
+
+/* =============================================================
+   缩放 / 平移
+   ============================================================= */
+function applyTransform() {
+  stage.style.transform = 'translate(' + view.tx + 'px, ' + view.ty + 'px) scale(' + view.s + ')';
+  $('z-val').textContent = Math.round(view.s * 100) + '%';
+}
+function zoomAt(cx, cy, k) {
+  const r = viewport.getBoundingClientRect();
+  const x = cx - r.left, y = cy - r.top;
+  const s2 = Math.min(3, Math.max(0.2, view.s * k));
+  const kk = s2 / view.s;
+  view.tx = x - (x - view.tx) * kk;
+  view.ty = y - (y - view.ty) * kk;
+  view.s = s2;
+  applyTransform();
+}
+function zoomCenter(k) {
+  const r = viewport.getBoundingClientRect();
+  zoomAt(r.left + r.width / 2, r.top + r.height / 2, k);
+}
+function fitToScreen() {
+  const el = stage.querySelector('svg');
+  if (!el || !el.viewBox || !el.viewBox.baseVal.width) return;
+  const vb = el.viewBox.baseVal;
+  const r = viewport.getBoundingClientRect();
+  if (!r.width || !r.height) return;
+  const m = 48;
+  const s = Math.min((r.width - m) / vb.width, (r.height - m) / vb.height, 1.4);
+  view.s = Math.max(0.2, Math.min(3, s));
+  view.tx = (r.width - vb.width * view.s) / 2;
+  view.ty = Math.max((r.height - vb.height * view.s) / 2, 24);
+  applyTransform();
+}
+function resetZoom() {
+  const el = stage.querySelector('svg');
+  const r = viewport.getBoundingClientRect();
+  view.s = 1;
+  if (el && el.viewBox && el.viewBox.baseVal.width) {
+    view.tx = Math.max((r.width - el.viewBox.baseVal.width) / 2, 24);
+  } else { view.tx = 24; }
+  view.ty = 24;
+  applyTransform();
+}
+
+let drag = null;
+let dragMoved = false;
+viewport.addEventListener('mousedown', (e) => {
+  if (e.button !== 0) return;
+  drag = { x: e.clientX, y: e.clientY, tx: view.tx, ty: view.ty };
+  dragMoved = false;
+});
+window.addEventListener('mousemove', (e) => {
+  if (!drag) return;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+  if (Math.abs(dx) > 3 || Math.abs(dy) > 3) dragMoved = true;
+  if (dragMoved) {
+    viewport.classList.add('dragging');
+    view.tx = drag.tx + dx;
+    view.ty = drag.ty + dy;
+    applyTransform();
+  }
+});
+window.addEventListener('mouseup', () => {
+  drag = null;
+  viewport.classList.remove('dragging');
+  setTimeout(() => { dragMoved = false; }, 0);
+});
+viewport.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  zoomAt(e.clientX, e.clientY, e.deltaY < 0 ? 1.12 : 1 / 1.12);
+}, { passive: false });
+
+/* =============================================================
+   历史 / 持久化：所有修改都必须经过 commit()
+   ============================================================= */
+function persist() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) { /* 隐私模式下忽略 */ }
+}
+function commit(mutator) {
+  undoStack.push(JSON.stringify(state));
+  if (undoStack.length > 50) undoStack.shift();
+  redoStack.length = 0;
+  mutator(state);
+  persist();
+  renderAll();
+}
+function undo() {
+  if (!undoStack.length) return;
+  redoStack.push(JSON.stringify(state));
+  state = JSON.parse(undoStack.pop());
+  persist();
+  afterHistoryJump();
+}
+function redo() {
+  if (!redoStack.length) return;
+  undoStack.push(JSON.stringify(state));
+  state = JSON.parse(redoStack.pop());
+  persist();
+  afterHistoryJump();
+}
+function afterHistoryJump() {
+  if (selected && !state.nodes[selected]) { selected = null; panelMode = 'empty'; }
+  else if (panelMode === 'edit' || panelMode === 'add') { panelMode = selected ? 'view' : 'empty'; }
+  renderAll();
+  renderPanel();
+}
+
+/* =============================================================
+   渲染：卡片视图
+   ============================================================= */
+function tagChip(n, cls) {
+  const t = tagOf(n);
+  return '<span class="' + cls + '" style="background:' + t.fill + ';border-color:' + t.border +
+    ';color:' + t.text + '">' + escapeHtml(t.label) + '</span>';
+}
+function renderCards() {
+  const wrap = $('cards');
+  let html = '';
+  state.phases.forEach((p) => {
+    const ids = p.nodes.filter((id) => state.nodes[id]);
+    if (!ids.length) return;
+    html += '<section class="phase"><div class="phase-head">' +
+      '<span class="phase-num">' + escapeHtml(p.num) + '</span>' +
+      '<span class="phase-title">' + escapeHtml(p.title) + '</span>' +
+      '<span class="phase-hint">' + escapeHtml(p.hint || '') + '</span></div><div class="card-grid">';
+    ids.forEach((id) => {
+      const n = state.nodes[id];
+      html += '<div class="card" data-id="' + id + '">' + tagChip(n, 'tag-chip') +
+        '<div class="card-title">' + escapeHtml(n.title) + '</div>' +
+        '<div class="card-purpose">' + escapeHtml(n.purpose || '') + '</div></div>';
+    });
+    html += '</div></section>';
+  });
+  const inPhase = new Set(state.phases.flatMap((p) => p.nodes));
+  const orphans = Object.keys(state.nodes).filter((id) => !inPhase.has(id));
+  if (orphans.length) {
+    html += '<section class="phase"><div class="phase-head"><span class="phase-num">未分组</span></div><div class="card-grid">';
+    orphans.forEach((id) => {
+      const n = state.nodes[id];
+      html += '<div class="card" data-id="' + id + '">' + tagChip(n, 'tag-chip') +
+        '<div class="card-title">' + escapeHtml(n.title) + '</div>' +
+        '<div class="card-purpose">' + escapeHtml(n.purpose || '') + '</div></div>';
+    });
+    html += '</div></section>';
+  }
+  wrap.innerHTML = html;
+}
+$('cards').addEventListener('click', (e) => {
+  const card = e.target.closest('.card');
+  if (card) showDetail(card.dataset.id);
+});
+$('cards').addEventListener('dblclick', (e) => {
+  const card = e.target.closest('.card');
+  if (card) openEdit(card.dataset.id);
+});
+
+/* =============================================================
+   渲染：连线管理
+   ============================================================= */
+function nodeOptions(sel) {
+  return Object.entries(state.nodes)
+    .map(([id, n]) => '<option value="' + id + '"' + (id === sel ? ' selected' : '') + '>' +
+      escapeHtml(n.title) + '</option>').join('');
+}
+function renderEdgeTable() {
+  const wrap = $('edges-wrap');
+  let rows = '';
+  state.edges.forEach((e, i) => {
+    if (!state.nodes[e.from] || !state.nodes[e.to]) return;
+    rows += '<tr>' +
+      '<td style="width:24%"><select data-idx="' + i + '" data-field="from">' + nodeOptions(e.from) + '</select></td>' +
+      '<td class="arrow">' + (e.style === 'dotted' ? '-·-&gt;' : '——&gt;') + '</td>' +
+      '<td style="width:24%"><select data-idx="' + i + '" data-field="to">' + nodeOptions(e.to) + '</select></td>' +
+      '<td style="width:26%"><input data-idx="' + i + '" data-field="label" value="' + escapeHtml(e.label || '') + '" placeholder="连线标签（可空）"></td>' +
+      '<td style="width:13%"><select data-idx="' + i + '" data-field="style">' +
+        '<option value="solid"' + (e.style !== 'dotted' ? ' selected' : '') + '>实线</option>' +
+        '<option value="dotted"' + (e.style === 'dotted' ? ' selected' : '') + '>虚线</option></select></td>' +
+      '<td style="width:8%;text-align:center"><button class="edge-del" data-idx="' + i + '">删除</button></td>' +
+      '</tr>';
+  });
+  wrap.innerHTML =
+    '<div class="edge-card"><table><thead><tr>' +
+    '<th>起点</th><th></th><th>终点</th><th>标签</th><th>线型</th><th style="text-align:center">操作</th>' +
+    '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
+    '<div class="edge-add-row"><button id="btn-edge-add" class="btn">＋ 新增连线</button></div>' +
+    '<div class="edges-note">修改任意一项后流程图立即更新。提示：不要创建「后面的节点连回前面的节点」的回边，会破坏自动布局——如需表达回环，在节点「处理逻辑」中用「↩ 回到 X」标注。</div>';
+}
+$('edges-wrap').addEventListener('change', (e) => {
+  const t = e.target;
+  if (t.dataset.idx === undefined || !t.dataset.field) return;
+  const idx = parseInt(t.dataset.idx, 10);
+  const field = t.dataset.field;
+  const val = t.value;
+  if (field === 'from' || field === 'to') {
+    const edge = state.edges[idx];
+    const from = field === 'from' ? val : edge.from;
+    const to = field === 'to' ? val : edge.to;
+    if (from === to) { alert('起点和终点不能是同一个节点'); renderEdgeTable(); return; }
+    const dup = state.edges.some((x, j) => j !== idx && x.from === from && x.to === to);
+    if (dup) { alert('这条连线已存在'); renderEdgeTable(); return; }
+  }
+  commit((st) => { st.edges[idx][field] = val; });
+});
+$('edges-wrap').addEventListener('click', (e) => {
+  if (e.target.classList.contains('edge-del')) {
+    const idx = parseInt(e.target.dataset.idx, 10);
+    commit((st) => { st.edges.splice(idx, 1); });
+    return;
+  }
+  if (e.target.id === 'btn-edge-add') {
+    const ids = Object.keys(state.nodes);
+    if (ids.length < 2) { alert('至少需要两个节点才能创建连线'); return; }
+    const from = ids[0];
+    const to = ids.find((id) => id !== from && !state.edges.some((x) => x.from === from && x.to === id));
+    if (!to) { alert('没有可用的新连线组合，请先在表格中调整现有连线'); return; }
+    commit((st) => { st.edges.push({ from: from, to: to, label: '', style: 'solid' }); });
+  }
+});
+
+/* =============================================================
+   详情面板：查看 / 编辑 / 新增
+   ============================================================= */
+function showDetail(id) {
+  if (!state.nodes[id]) return;
+  selected = id;
+  panelMode = 'view';
+  renderPanel();
+}
+function openEdit(id) {
+  if (!state.nodes[id]) return;
+  selected = id;
+  panelMode = 'edit';
+  renderPanel();
+  const inp = $('f-title');
+  if (inp) { inp.focus(); inp.select(); }
+}
+function openAdd() {
+  panelMode = 'add';
+  renderPanel();
+  const inp = $('f-title');
+  if (inp) inp.focus();
+}
+function phaseOfNode(id) {
+  const p = state.phases.find((x) => x.nodes.includes(id));
+  return p ? p.id : '';
+}
+function tagSelectHtml(sel) {
+  return Object.entries(TAGS).map(([k, t]) =>
+    '<option value="' + k + '"' + (k === sel ? ' selected' : '') + '>' + escapeHtml(t.label) + '</option>').join('');
+}
+function phaseSelectHtml(sel) {
+  return state.phases.map((p) =>
+    '<option value="' + p.id + '"' + (p.id === sel ? ' selected' : '') + '>' +
+    escapeHtml(p.num + ' · ' + p.title) + '</option>').join('') +
+    '<option value=""' + (sel === '' ? ' selected' : '') + '>不分组</option>';
+}
+function formHtml(n, phaseId) {
+  return '<div class="f-group"><label>节点标题</label>' +
+    '<input id="f-title" value="' + escapeHtml(n.title) + '" placeholder="尽量不超过 14 个字"></div>' +
+    '<div class="f-row">' +
+    '<div class="f-group"><label>分类</label><select id="f-tag">' + tagSelectHtml(n.tag) + '</select></div>' +
+    '<div class="f-group"><label>所属阶段</label><select id="f-phase">' + phaseSelectHtml(phaseId) + '</select></div>' +
+    '</div>' +
+    '<div class="f-group"><label>🎯 目的（一句话）</label>' +
+    '<textarea id="f-purpose" style="min-height:64px">' + escapeHtml(n.purpose || '') + '</textarea></div>' +
+    '<div class="f-group"><label>⚙️ 处理逻辑（可多行，用 ①②③ 列步骤）</label>' +
+    '<textarea id="f-logic">' + escapeHtml(n.logic || '') + '</textarea></div>';
+}
+function renderPanel() {
+  if (panelMode === 'view' && selected && state.nodes[selected]) {
+    const n = state.nodes[selected];
+    panel.innerHTML =
+      tagChip(n, 'p-tag') +
+      '<div class="p-title">' + escapeHtml(n.title) + '</div>' +
+      '<div class="p-id">节点 ID：' + escapeHtml(selected) + '</div>' +
+      '<div class="p-h3">🎯 目的</div><div class="p-content">' + escapeHtml(n.purpose || '—') + '</div>' +
+      '<div class="p-h3">⚙️ 处理逻辑</div><div class="p-content">' + escapeHtml(n.logic || '—') + '</div>' +
+      '<div class="p-actions">' +
+      '<button class="btn btn-primary" data-act="edit">✏️ 编辑节点</button>' +
+      '<button class="btn btn-danger" data-act="del">删除节点</button>' +
+      '</div>';
+    return;
+  }
+  if (panelMode === 'edit' && selected && state.nodes[selected]) {
+    const n = state.nodes[selected];
+    panel.innerHTML =
+      '<div class="p-form-title">✏️ 编辑节点 <span style="font-weight:400;color:var(--ink-4);font-size:11px">（' + escapeHtml(selected) + '）</span></div>' +
+      formHtml(n, phaseOfNode(selected)) +
+      '<div class="p-actions">' +
+      '<button class="btn btn-primary" data-act="save-edit">保存</button>' +
+      '<button class="btn" data-act="cancel-edit">取消</button>' +
+      '</div>';
+    return;
+  }
+  if (panelMode === 'add') {
+    const blank = { title: '', tag: 'talk', purpose: '', logic: '' };
+    const opts = '<option value="">（不连线）</option>' + nodeOptions('');
+    panel.innerHTML =
+      '<div class="p-form-title">＋ 新增节点</div>' +
+      formHtml(blank, state.phases.length ? state.phases[0].id : '') +
+      '<div class="f-row">' +
+      '<div class="f-group"><label>上游节点（自动建连线，可选）</label><select id="f-up">' + opts + '</select></div>' +
+      '<div class="f-group"><label>下游节点（自动建连线，可选）</label><select id="f-down">' + opts + '</select></div>' +
+      '</div>' +
+      '<div class="p-actions">' +
+      '<button class="btn btn-primary" data-act="save-add">创建节点</button>' +
+      '<button class="btn" data-act="cancel-add">取消</button>' +
+      '</div>';
+    return;
+  }
+  selected = null;
+  panelMode = 'empty';
+  panel.innerHTML = '<div class="p-empty">点击流程图或卡片中的任意节点查看详情<br>双击节点可直接编辑文字<br>工具栏「＋ 新增节点」可添加新步骤</div>';
+}
+function movePhase(st, id, phaseId) {
+  st.phases.forEach((p) => { p.nodes = p.nodes.filter((x) => x !== id); });
+  if (phaseId) {
+    const p = st.phases.find((x) => x.id === phaseId);
+    if (p) p.nodes.push(id);
+  }
+}
+function saveEdit() {
+  const title = $('f-title').value.trim();
+  if (!title) { alert('节点标题不能为空'); return; }
+  const tag = $('f-tag').value, phaseId = $('f-phase').value;
+  const purpose = $('f-purpose').value.trim(), logic = $('f-logic').value.trim();
+  commit((st) => {
+    const n = st.nodes[selected];
+    n.title = title; n.tag = tag; n.purpose = purpose; n.logic = logic;
+    movePhase(st, selected, phaseId);
+  });
+  panelMode = 'view';
+  renderPanel();
+}
+function saveAdd() {
+  const title = $('f-title').value.trim();
+  if (!title) { alert('节点标题不能为空'); return; }
+  const tag = $('f-tag').value, phaseId = $('f-phase').value;
+  const purpose = $('f-purpose').value.trim(), logic = $('f-logic').value.trim();
+  const up = $('f-up').value, down = $('f-down').value;
+  let i = 1;
+  while (state.nodes['N' + i]) i++;
+  const nid = 'N' + i;
+  commit((st) => {
+    st.nodes[nid] = { title: title, tag: tag, purpose: purpose, logic: logic };
+    movePhase(st, nid, phaseId);
+    if (up && st.nodes[up]) st.edges.push({ from: up, to: nid, label: '', style: 'solid' });
+    if (down && st.nodes[down]) st.edges.push({ from: nid, to: down, label: '', style: 'solid' });
+  });
+  selected = nid;
+  panelMode = 'view';
+  renderPanel();
+}
+function deleteNode(id) {
+  const n = state.nodes[id];
+  if (!n) return;
+  if (!confirm('确定删除节点「' + n.title + '」吗？相关连线会一并删除。')) return;
+  commit((st) => {
+    delete st.nodes[id];
+    st.edges = st.edges.filter((e) => e.from !== id && e.to !== id);
+    st.phases.forEach((p) => { p.nodes = p.nodes.filter((x) => x !== id); });
+  });
+  selected = null;
+  panelMode = 'empty';
+  renderPanel();
+}
+panel.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-act]');
+  if (!btn) return;
+  const act = btn.dataset.act;
+  if (act === 'edit') openEdit(selected);
+  else if (act === 'del') deleteNode(selected);
+  else if (act === 'save-edit') saveEdit();
+  else if (act === 'cancel-edit') { panelMode = 'view'; renderPanel(); }
+  else if (act === 'save-add') saveAdd();
+  else if (act === 'cancel-add') { panelMode = selected ? 'view' : 'empty'; renderPanel(); }
+});
+
+/* =============================================================
+   图例 / 工具栏 / 视图切换
+   ============================================================= */
+function renderLegend() {
+  $('legend').innerHTML = Object.values(TAGS).map((t) =>
+    '<span class="lg-item"><span class="lg-swatch" style="background:' + t.fill +
+    ';border-color:' + t.border + '"></span>' + escapeHtml(t.label) + '</span>').join('') +
+    '<span class="lg-hint">单击节点看详情 · 双击直接编辑 · 滚轮缩放 · 拖拽平移 · Ctrl+Z 撤销</span>';
+}
+function updateToolbar() {
+  $('btn-undo').disabled = !undoStack.length;
+  $('btn-redo').disabled = !redoStack.length;
+}
+async function renderAll() {
+  updateToolbar();
+  await renderFlow();
+  renderCards();
+  renderEdgeTable();
+}
+document.querySelectorAll('.tab').forEach((t) => {
+  t.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('active', x === t));
+    document.querySelectorAll('.view').forEach((v) =>
+      v.classList.toggle('active', v.dataset.view === t.dataset.view));
+  });
+});
+$('btn-add').addEventListener('click', openAdd);
+$('btn-undo').addEventListener('click', undo);
+$('btn-redo').addEventListener('click', redo);
+$('z-in').addEventListener('click', () => zoomCenter(1.2));
+$('z-out').addEventListener('click', () => zoomCenter(1 / 1.2));
+$('z-fit').addEventListener('click', fitToScreen);
+$('z-reset').addEventListener('click', resetZoom);
+
+/* =============================================================
+   导出 / 重置
+   ============================================================= */
+function download(name, text, type) {
+  const a = document.createElement('a');
+  const blob = new Blob([text], { type: type || 'text/plain;charset=utf-8' });
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 100);
+}
+$('btn-export-mmd').addEventListener('click', () =>
+  download('对讲机组队流程.mmd', buildMermaid(state)));
+$('btn-export-json').addEventListener('click', () =>
+  download('对讲机组队流程.json', JSON.stringify(state, null, 2), 'application/json;charset=utf-8'));
+$('btn-reset').addEventListener('click', () => {
+  if (!confirm('确定重置为初始版本吗？你的全部修改（含浏览器本地存档）将被清除。')) return;
+  try { localStorage.removeItem(STORE_KEY); } catch (e) { /* 忽略 */ }
+  state = deepCopy(INITIAL);
+  undoStack = [];
+  redoStack = [];
+  selected = null;
+  panelMode = 'empty';
+  view.fitted = false;
+  renderAll();
+  renderPanel();
+});
+
+/* =============================================================
+   快捷键
+   ============================================================= */
+document.addEventListener('keydown', (e) => {
+  const tag = (e.target.tagName || '').toUpperCase();
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); return; }
+  if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) { e.preventDefault(); redo(); return; }
+  if (e.key === '+' || e.key === '=') zoomCenter(1.2);
+  else if (e.key === '-') zoomCenter(1 / 1.2);
+  else if (e.key === '0') resetZoom();
+  else if (e.key === 'f' || e.key === 'F') fitToScreen();
+  else if (e.key === 'Delete' && selected && panelMode === 'view') deleteNode(selected);
+});
+
+/* =============================================================
+   初始化
+   ============================================================= */
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (raw) {
+      const s = JSON.parse(raw);
+      if (s && s.nodes && s.edges && s.phases) return s;
+    }
+  } catch (e) { /* 存档损坏则用初始数据 */ }
+  return deepCopy(INITIAL);
+}
+(function init() {
+  if (window.mermaid) {
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'base',
+      flowchart: { curve: 'basis', htmlLabels: true, nodeSpacing: 40, rankSpacing: 60, padding: 12 },
+      themeVariables: {
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif",
+        fontSize: '14px',
+        lineColor: '#8AABAB',
+        edgeLabelBackground: '#F0FAFA',
+        clusterBkg: '#F4FBFB',
+        clusterBorder: '#B8DEDE',
+        primaryColor: '#D0F5F5',
+        primaryBorderColor: '#00bebe',
+        primaryTextColor: '#1A1F1F',
+        titleColor: '#1A1F1F',
+        nodeTextColor: '#1A1F1F'
+      }
+    });
+  }
+  state = loadState();
+  renderLegend();
+  renderPanel();
+  renderAll();
+})();
+</script>
+</body>
+</html>
