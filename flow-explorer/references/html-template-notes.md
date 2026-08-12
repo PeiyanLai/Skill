@@ -95,7 +95,7 @@ classDef decision fill:#FFFFFF,stroke:#00AAAA,color:#1A1F1F,stroke-width:1.5px,s
 
 - 白底，底边 `1px solid var(--line)`，`position: sticky; top: 0; z-index: 30`
 - 左侧 tabs：`data-view` 属性切换；激活态背景 `var(--grad)`、白字、圆角 8px；非激活 `var(--ink-3)`，hover 背景 `var(--bg-soft)`
-- 右侧编辑工具按钮：`+ 新增节点`（主按钮，`var(--grad)` 底白字）、`撤销`/`重做`（描边按钮，禁用态 40% 透明度）、`导出 Mermaid`、`导出 JSON`、`重置`（描边按钮，红字用 `#D14545` 仅此一处）
+- 右侧编辑工具按钮：`+ 新增节点`（主按钮，`var(--grad)` 底白字）、`撤销`/`重做`（描边按钮，禁用态 40% 透明度）、`自动布局`（清除全部手动拖动偏移）、`导出 Mermaid`、`导出 JSON`、`重置`（描边按钮，红字用 `#D14545` 仅此一处）
 - 描边按钮样式：白底、`1px solid var(--line-2)`、`var(--ink-2)` 字、hover 边框变 `var(--accent)`
 
 ### 3. Legend bar
@@ -159,8 +159,8 @@ classDef decision fill:#FFFFFF,stroke:#00AAAA,color:#1A1F1F,stroke-width:1.5px,s
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 <script>
   const TAGS   = { /* key: {label, border, fill, text, shape?} */ };
-  const INITIAL = { nodes: {...}, edges: [...], phases: [...] };  // 初始数据（深拷贝后使用）
-  let state;                      // 当前数据模型（唯一事实源）
+  const INITIAL = { nodes: {...}, edges: [...], phases: [...], layout: {} };  // 初始数据（深拷贝后使用）
+  let state;                      // 当前数据模型（唯一事实源；layout 存拖动偏移 id -> {dx, dy}）
   let undoStack = [], redoStack = [];   // 历史快照（JSON 字符串，上限 50）
   let view = { s: 1, tx: 0, ty: 0, fitted: false };  // 缩放平移状态
 
@@ -222,8 +222,34 @@ classDef decision fill:#FFFFFF,stroke:#00AAAA,color:#1A1F1F,stroke-width:1.5px,s
 
 要点回顾：
 
-- **单一事实源**：一切编辑都改 `state`，图、卡片、连线表全部从 `state` 重建，永不手改 SVG
-- **重渲染保位**：`view` 里的缩放平移与 `state` 解耦，重渲染不回跳
+- **单一事实源**：一切编辑都改 `state`，图、卡片、连线表全部从 `state` 重建，永不手改 SVG（唯一例外：拖动只更新当前节点 transform + 重画连线层，DOM 已是最新状态，不必整图重渲染）
+- **重渲染保位**：`view` 里的缩放平移与 `state` 解耦，重渲染不回跳；重渲染后按 `state.layout` 重放偏移
 - **快捷键**：`+`/`−` 缩放、`0` 复位 100%、`F` 适应屏幕、`Ctrl+Z`/`Ctrl+Shift+Z`(或 `Ctrl+Y`) 撤销重做；输入框聚焦时快捷键失效（判断 `e.target` 是否为 INPUT/TEXTAREA/SELECT）
 - **平移**：视口 mousedown 起拖，移动阈值 3px 以内视为点击（不干扰节点 click）
 - **滚轮缩放**：以鼠标位置为锚点，`s` 限制在 0.2–3
+
+## 五、节点拖拽与自绘连线层
+
+「每个方框可随意拖动」不能靠 Mermaid 本身实现（它的连线路径是布局时算死的）。采用分层方案：
+
+**Mermaid 只负责两件事：自动布局 + 绘制节点和阶段容器。连线一律删掉重画。**
+
+渲染管线（每次 `mermaid.render` 之后执行 `setupScene(svg)`）：
+
+1. **索引节点**：遍历 `.node`，从 `el.transform.baseVal` 读出 Mermaid 给的基准位置 `baseX/baseY`，`el.getBBox()` 记录尺寸，存入 `nodeGeo[id]`；随后把 `state.layout[id]` 的偏移加到 transform 上（重放上次的拖动结果）
+2. **换连线层**：删除 Mermaid 的 `.edgePaths` 与 `.edgeLabels`，在原位置插入自绘 `<g class="custom-edges">`（保持在节点之下）；`<defs>` 里注册箭头 `<marker>`（填充 `#8AABAB`）
+3. **画连线** `drawEdges()`：对每条 `state.edges`，取两端节点当前几何 `geoOf(id)`（基准 + 偏移），按相对方位选锚点——垂直为主时从底边中点到顶边中点，水平为主时从侧边中点出发——用三次贝塞尔连接，控制点距离 `clamp(距离*0.4, 24, 120)`；虚线 `stroke-dasharray: 4 4`；标签取 `path.getPointAtLength(total/2)` 中点，`#F0FAFA` 圆角底 + `#5C7070` 文字
+4. **重算容器** `updateClusters()`：每个阶段容器矩形改为成员节点外接矩形 + padding（顶部多留 ~46px 放标题），标题 `.cluster-label` 平移到顶部居中。容器元素优先 `svg.getElementById(phase.id)`，找不到就按标题文本在 `.cluster` 里匹配（Mermaid 版本差异兜底）
+
+拖动交互：
+
+- 节点 `mousedown` 时 `stopPropagation()`（避免触发画布平移），记录起点与 `JSON.stringify(state)` 快照
+- `mousemove` 中把屏幕位移除以缩放系数 `view.s` 换算成 SVG 坐标，写入 `state.layout[id]`，然后只做三件事：更新该节点 transform、`drawEdges()`、`updateClusters()`——十几条边全量重画每帧毫无压力，代码远比增量更新简单
+- `mouseup` 时若确实移动过（阈值 3px）：把拖前快照压入 undo 栈、清空 redo、`persist()`。**一次完整拖动 = 一条历史记录**
+- 松手后用一个微任务级标志（`setTimeout(0)` 清除）吞掉紧随的 click，避免拖完误触详情面板
+
+三个必须防的坑：
+
+- **`display:none` 里的 SVG 无法 `getBBox()`**——视图切换要用 `visibility: hidden` + 绝对定位，保证隐藏的流程图仍有布局（在「连线管理」视图里改数据也要能重渲染流程图）
+- **拖出 viewBox 会被裁剪**——给 `svg` 设 `overflow: visible`
+- **fit/复位不能再用 viewBox**——节点可能已拖到 viewBox 之外，改用 `svg.getBBox()` 的实际内容外接矩形计算缩放与居中

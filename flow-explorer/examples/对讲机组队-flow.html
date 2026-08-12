@@ -138,10 +138,11 @@ body {
 
 /* ---------- Layout ---------- */
 .layout { flex: 1; display: flex; min-height: 0; }
-.left-content { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.view { display: none; flex: 1; min-height: 0; overflow: auto; }
-.view.active { display: block; }
-.view[data-view="flow"].active { display: flex; flex-direction: column; overflow: hidden; }
+.left-content { flex: 1; min-width: 0; position: relative; }
+/* 用 visibility 而非 display 隐藏视图：保证隐藏的流程图仍有布局，getBBox 等测量可用 */
+.view { position: absolute; inset: 0; visibility: hidden; overflow: auto; }
+.view.active { visibility: visible; }
+.view[data-view="flow"] { display: flex; flex-direction: column; overflow: hidden; }
 
 /* ---------- Mermaid viewport ---------- */
 #viewport {
@@ -159,9 +160,10 @@ body {
 }
 #viewport.dragging { cursor: grabbing; }
 #stage { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
-#stage svg { display: block; max-width: none !important; width: auto !important; height: auto !important; }
-#stage .node { cursor: pointer; }
+#stage svg { display: block; max-width: none !important; width: auto !important; height: auto !important; overflow: visible; }
+#stage .node { cursor: grab; }
 #stage .node:hover { filter: brightness(0.97); }
+#stage .node.dragging { cursor: grabbing; }
 .render-err { padding: 40px; color: #D14545; font-size: 13px; max-width: 560px; line-height: 1.8; }
 
 .zoom-ctrl {
@@ -389,6 +391,7 @@ body {
     <button id="btn-add" class="btn btn-primary">＋ 新增节点</button>
     <button id="btn-undo" class="btn" disabled>↶ 撤销</button>
     <button id="btn-redo" class="btn" disabled>↷ 重做</button>
+    <button id="btn-layout" class="btn" title="清除全部手动拖动，恢复自动排版">自动布局</button>
     <button id="btn-export-mmd" class="btn">导出 Mermaid</button>
     <button id="btn-export-json" class="btn">导出 JSON</button>
     <button id="btn-reset" class="btn btn-danger">重置</button>
@@ -422,7 +425,7 @@ body {
 
 <footer class="page-footer">
   <div class="marker"></div>
-  对讲机组队功能交互流程 · 2026-08 · 本页面可直接编辑（双击节点改文字 / 工具栏增删节点 / 连线管理改连线），修改自动保存于浏览器本地
+  对讲机组队功能交互流程 · 2026-08 · 本页面可直接编辑（双击节点改文字 / 拖动方框调整位置 / 工具栏增删节点 / 连线管理改连线），修改自动保存于浏览器本地
 </footer>
 
 <script>
@@ -547,7 +550,9 @@ const INITIAL = {
     { id: 'P3', num: '阶段 3', title: '在线对讲',          hint: '方向盘一键讲话，全队同时收听',      nodes: ['PTT', 'NET_CHECK', 'CLOUD', 'ALL_RECV'] },
     { id: 'P4', num: '场景 1', title: '无网硬件对讲',      hint: '5–8 公里组网，有网车辆桥接成链',    nodes: ['RADIO_SEND', 'RADIO_RECV', 'BRIDGE'] },
     { id: 'P5', num: '场景 2', title: '非本品牌车加入',    hint: '对讲机化身车机，App 远程通话',      nodes: ['GIVE', 'APP_BIND', 'APP_JOIN', 'APP_TALK'] }
-  ]
+  ],
+  /* 手动拖动产生的位置偏移：id -> {dx, dy}（相对 Mermaid 自动布局的位置） */
+  layout: {}
 };
 
 /* =============================================================
@@ -638,7 +643,13 @@ function buildMermaid(st) {
 
 /* =============================================================
    渲染：流程图
+   Mermaid 只负责自动布局和绘制节点/阶段容器；渲染后删除它自带的
+   连线，换成自绘连线层——节点因此可以随意拖动，连线与容器实时跟随。
    ============================================================= */
+const SVG_NS = 'http://www.w3.org/2000/svg';
+let nodeGeo = {};      // id -> { el, baseX, baseY, bb }：Mermaid 给出的基准位置与尺寸
+let edgeLayer = null;  // 自绘连线所在的 <g>
+
 async function renderFlow() {
   if (!window.mermaid) {
     stage.style.transform = 'none';
@@ -653,7 +664,7 @@ async function renderFlow() {
       el.setAttribute('width', el.viewBox.baseVal.width);
       el.setAttribute('height', el.viewBox.baseVal.height);
     }
-    bindNodeEvents();
+    setupScene(el);
     if (!view.fitted) { fitToScreen(); view.fitted = true; }
     else applyTransform();
   } catch (err) {
@@ -661,20 +672,171 @@ async function renderFlow() {
     stage.innerHTML = '<div class="render-err">流程图渲染失败：' + escapeHtml(err && err.message ? err.message : err) + '</div>';
   }
 }
-function bindNodeEvents() {
-  stage.querySelectorAll('.node').forEach((el) => {
+
+function setupScene(svg) {
+  nodeGeo = {};
+  // 1. 索引节点：记录 Mermaid 基准位置，应用已保存的拖动偏移，绑定交互
+  svg.querySelectorAll('.node').forEach((el) => {
     const m = /^flowchart-(.+?)-\d+$/.exec(el.id || '');
     if (!m || !state.nodes[m[1]]) return;
-    const nid = m[1];
-    el.addEventListener('click', (e) => {
-      if (dragMoved) return;
-      e.stopPropagation();
-      showDetail(nid);
-    });
-    el.addEventListener('dblclick', (e) => {
-      e.stopPropagation();
-      openEdit(nid);
-    });
+    const id = m[1];
+    let baseX = 0, baseY = 0;
+    try {
+      const mt = el.transform.baseVal.getItem(0).matrix;
+      baseX = mt.e; baseY = mt.f;
+    } catch (e) { /* 无 transform 则视为原点 */ }
+    nodeGeo[id] = { el: el, baseX: baseX, baseY: baseY, bb: el.getBBox() };
+    applyNodeOffset(id);
+    bindNode(el, id);
+  });
+  // 2. 删除 Mermaid 自带连线与标签，插入自绘图层（置于节点之下）
+  const paths = svg.querySelector('.edgePaths');
+  const labels = svg.querySelector('.edgeLabels');
+  const nodesG = svg.querySelector('.nodes');
+  const host = (paths && paths.parentNode) || (nodesG && nodesG.parentNode) || svg;
+  edgeLayer = document.createElementNS(SVG_NS, 'g');
+  edgeLayer.setAttribute('class', 'custom-edges');
+  host.insertBefore(edgeLayer, paths || nodesG || null);
+  if (paths) paths.remove();
+  if (labels) labels.remove();
+  // 3. 箭头 marker
+  const defs = document.createElementNS(SVG_NS, 'defs');
+  defs.innerHTML = '<marker id="fe-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8AABAB"></path></marker>';
+  svg.appendChild(defs);
+  drawEdges();
+  updateClusters(svg);
+}
+
+function applyNodeOffset(id) {
+  const g = nodeGeo[id];
+  if (!g) return;
+  const off = state.layout[id] || { dx: 0, dy: 0 };
+  g.el.setAttribute('transform', 'translate(' + (g.baseX + off.dx) + ',' + (g.baseY + off.dy) + ')');
+}
+function geoOf(id) {
+  const g = nodeGeo[id];
+  if (!g) return null;
+  const off = state.layout[id] || { dx: 0, dy: 0 };
+  const x = g.baseX + off.dx + g.bb.x;
+  const y = g.baseY + off.dy + g.bb.y;
+  return { x: x, y: y, w: g.bb.width, h: g.bb.height, cx: x + g.bb.width / 2, cy: y + g.bb.height / 2 };
+}
+
+/* 自绘连线：按两节点相对方位从边框中点出发，三次贝塞尔连接 */
+function drawEdges() {
+  if (!edgeLayer) return;
+  while (edgeLayer.firstChild) edgeLayer.removeChild(edgeLayer.firstChild);
+  state.edges.forEach((e) => {
+    const a = geoOf(e.from), b = geoOf(e.to);
+    if (!a || !b) return;
+    let p1, p2, c1, c2;
+    const dx = b.cx - a.cx, dy = b.cy - a.cy;
+    if (Math.abs(dy) >= Math.abs(dx)) {
+      const sgn = dy >= 0 ? 1 : -1;
+      p1 = { x: a.cx, y: a.cy + sgn * a.h / 2 };
+      p2 = { x: b.cx, y: b.cy - sgn * b.h / 2 };
+      const k = Math.min(Math.max(Math.abs(p2.y - p1.y) * 0.4, 24), 120) * sgn;
+      c1 = { x: p1.x, y: p1.y + k };
+      c2 = { x: p2.x, y: p2.y - k };
+    } else {
+      const sgn = dx >= 0 ? 1 : -1;
+      p1 = { x: a.cx + sgn * a.w / 2, y: a.cy };
+      p2 = { x: b.cx - sgn * b.w / 2, y: b.cy };
+      const k = Math.min(Math.max(Math.abs(p2.x - p1.x) * 0.4, 24), 120) * sgn;
+      c1 = { x: p1.x + k, y: p1.y };
+      c2 = { x: p2.x - k, y: p2.y };
+    }
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', 'M' + p1.x + ',' + p1.y + ' C' + c1.x + ',' + c1.y + ' ' + c2.x + ',' + c2.y + ' ' + p2.x + ',' + p2.y);
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', '#8AABAB');
+    path.setAttribute('stroke-width', '1.5');
+    path.setAttribute('marker-end', 'url(#fe-arrow)');
+    if (e.style === 'dotted') path.setAttribute('stroke-dasharray', '4 4');
+    edgeLayer.appendChild(path);
+    if (e.label) {
+      const mid = path.getPointAtLength(path.getTotalLength() / 2);
+      const g = document.createElementNS(SVG_NS, 'g');
+      const text = document.createElementNS(SVG_NS, 'text');
+      text.textContent = e.label;
+      text.setAttribute('x', mid.x);
+      text.setAttribute('y', mid.y);
+      text.setAttribute('text-anchor', 'middle');
+      text.setAttribute('dominant-baseline', 'middle');
+      text.setAttribute('font-size', '12');
+      text.setAttribute('fill', '#5C7070');
+      g.appendChild(text);
+      edgeLayer.appendChild(g);
+      const tb = text.getBBox();
+      const rect = document.createElementNS(SVG_NS, 'rect');
+      rect.setAttribute('x', tb.x - 5);
+      rect.setAttribute('y', tb.y - 3);
+      rect.setAttribute('width', tb.width + 10);
+      rect.setAttribute('height', tb.height + 6);
+      rect.setAttribute('rx', '4');
+      rect.setAttribute('fill', '#F0FAFA');
+      rect.setAttribute('stroke', '#D8EEEE');
+      rect.setAttribute('stroke-width', '0.5');
+      g.insertBefore(rect, text);
+    }
+  });
+}
+
+/* 阶段容器：始终包住其成员节点（拖动后重算外接矩形与标题位置） */
+function clusterElOf(svg, phase) {
+  const byId = svg.getElementById && svg.getElementById(phase.id);
+  if (byId && byId.classList && byId.classList.contains('cluster')) return byId;
+  const want = phase.num + ' · ' + phase.title;
+  let found = null;
+  svg.querySelectorAll('.cluster').forEach((c) => {
+    if (!found && (c.textContent || '').indexOf(want) !== -1) found = c;
+  });
+  return found;
+}
+function updateClusters(svg) {
+  state.phases.forEach((p) => {
+    const g = clusterElOf(svg, p);
+    if (!g) return;
+    const geos = p.nodes.filter((id) => nodeGeo[id]).map(geoOf);
+    if (!geos.length) return;
+    const pad = 22, padTop = 46;
+    const x0 = Math.min.apply(null, geos.map((q) => q.x)) - pad;
+    const y0 = Math.min.apply(null, geos.map((q) => q.y)) - padTop;
+    const x1 = Math.max.apply(null, geos.map((q) => q.x + q.w)) + pad;
+    const y1 = Math.max.apply(null, geos.map((q) => q.y + q.h)) + pad;
+    const rect = g.querySelector('rect');
+    if (rect) {
+      rect.setAttribute('x', x0);
+      rect.setAttribute('y', y0);
+      rect.setAttribute('width', x1 - x0);
+      rect.setAttribute('height', y1 - y0);
+    }
+    const lbl = g.querySelector('.cluster-label');
+    if (lbl) {
+      const bb = lbl.getBBox();
+      lbl.setAttribute('transform', 'translate(' + ((x0 + x1) / 2 - bb.width / 2 - bb.x) + ',' + (y0 + 10 - bb.y) + ')');
+    }
+  });
+}
+
+/* 节点交互：单击详情、双击编辑、按住拖动 */
+let nodeDrag = null;
+let nodeDragEnded = false;
+function bindNode(el, id) {
+  el.addEventListener('click', (e) => {
+    if (dragMoved || nodeDragEnded) return;
+    e.stopPropagation();
+    showDetail(id);
+  });
+  el.addEventListener('dblclick', (e) => {
+    e.stopPropagation();
+    openEdit(id);
+  });
+  el.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();   // 拖节点时不平移画布
+    const off = state.layout[id] || { dx: 0, dy: 0 };
+    nodeDrag = { id: id, x: e.clientX, y: e.clientY, dx: off.dx, dy: off.dy, moved: false, snap: JSON.stringify(state) };
   });
 }
 
@@ -699,27 +861,39 @@ function zoomCenter(k) {
   const r = viewport.getBoundingClientRect();
   zoomAt(r.left + r.width / 2, r.top + r.height / 2, k);
 }
-function fitToScreen() {
+function contentBox() {
   const el = stage.querySelector('svg');
-  if (!el || !el.viewBox || !el.viewBox.baseVal.width) return;
-  const vb = el.viewBox.baseVal;
+  if (!el) return null;
+  /* 拖动可能把节点拖出原 viewBox，用实际内容外接矩形计算 */
+  try {
+    const bb = el.getBBox();
+    if (bb && bb.width && bb.height) return bb;
+  } catch (e) { /* 忽略，退回 viewBox */ }
+  if (el.viewBox && el.viewBox.baseVal.width) {
+    return { x: 0, y: 0, width: el.viewBox.baseVal.width, height: el.viewBox.baseVal.height };
+  }
+  return null;
+}
+function fitToScreen() {
+  const bb = contentBox();
+  if (!bb) return;
   const r = viewport.getBoundingClientRect();
   if (!r.width || !r.height) return;
   const m = 48;
-  const s = Math.min((r.width - m) / vb.width, (r.height - m) / vb.height, 1.4);
+  const s = Math.min((r.width - m) / bb.width, (r.height - m) / bb.height, 1.4);
   view.s = Math.max(0.2, Math.min(3, s));
-  view.tx = (r.width - vb.width * view.s) / 2;
-  view.ty = Math.max((r.height - vb.height * view.s) / 2, 24);
+  view.tx = (r.width - bb.width * view.s) / 2 - bb.x * view.s;
+  view.ty = Math.max((r.height - bb.height * view.s) / 2, 24) - bb.y * view.s;
   applyTransform();
 }
 function resetZoom() {
-  const el = stage.querySelector('svg');
+  const bb = contentBox();
   const r = viewport.getBoundingClientRect();
   view.s = 1;
-  if (el && el.viewBox && el.viewBox.baseVal.width) {
-    view.tx = Math.max((r.width - el.viewBox.baseVal.width) / 2, 24);
-  } else { view.tx = 24; }
-  view.ty = 24;
+  if (bb) {
+    view.tx = Math.max((r.width - bb.width) / 2, 24) - bb.x;
+    view.ty = 24 - bb.y;
+  } else { view.tx = 24; view.ty = 24; }
   applyTransform();
 }
 
@@ -731,6 +905,24 @@ viewport.addEventListener('mousedown', (e) => {
   dragMoved = false;
 });
 window.addEventListener('mousemove', (e) => {
+  /* 节点拖动优先于画布平移 */
+  if (nodeDrag) {
+    const ddx = (e.clientX - nodeDrag.x) / view.s;
+    const ddy = (e.clientY - nodeDrag.y) / view.s;
+    if (Math.abs(e.clientX - nodeDrag.x) > 3 || Math.abs(e.clientY - nodeDrag.y) > 3) nodeDrag.moved = true;
+    if (nodeDrag.moved) {
+      const g = nodeGeo[nodeDrag.id];
+      if (g) {
+        g.el.classList.add('dragging');
+        state.layout[nodeDrag.id] = { dx: Math.round((nodeDrag.dx + ddx) * 10) / 10, dy: Math.round((nodeDrag.dy + ddy) * 10) / 10 };
+        applyNodeOffset(nodeDrag.id);
+        drawEdges();
+        const svg = stage.querySelector('svg');
+        if (svg) updateClusters(svg);
+      }
+    }
+    return;
+  }
   if (!drag) return;
   const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
   if (Math.abs(dx) > 3 || Math.abs(dy) > 3) dragMoved = true;
@@ -742,6 +934,22 @@ window.addEventListener('mousemove', (e) => {
   }
 });
 window.addEventListener('mouseup', () => {
+  if (nodeDrag) {
+    const g = nodeGeo[nodeDrag.id];
+    if (g) g.el.classList.remove('dragging');
+    if (nodeDrag.moved) {
+      /* 一次拖动记一条历史，落库但不整图重渲染（DOM 已是最新状态） */
+      undoStack.push(nodeDrag.snap);
+      if (undoStack.length > 50) undoStack.shift();
+      redoStack.length = 0;
+      persist();
+      updateToolbar();
+      nodeDragEnded = true;
+      setTimeout(() => { nodeDragEnded = false; }, 0);
+    }
+    nodeDrag = null;
+    return;
+  }
   drag = null;
   viewport.classList.remove('dragging');
   setTimeout(() => { dragMoved = false; }, 0);
@@ -1038,6 +1246,7 @@ function deleteNode(id) {
   if (!confirm('确定删除节点「' + n.title + '」吗？相关连线会一并删除。')) return;
   commit((st) => {
     delete st.nodes[id];
+    delete st.layout[id];
     st.edges = st.edges.filter((e) => e.from !== id && e.to !== id);
     st.phases.forEach((p) => { p.nodes = p.nodes.filter((x) => x !== id); });
   });
@@ -1064,7 +1273,7 @@ function renderLegend() {
   $('legend').innerHTML = Object.values(TAGS).map((t) =>
     '<span class="lg-item"><span class="lg-swatch" style="background:' + t.fill +
     ';border-color:' + t.border + '"></span>' + escapeHtml(t.label) + '</span>').join('') +
-    '<span class="lg-hint">单击节点看详情 · 双击直接编辑 · 滚轮缩放 · 拖拽平移 · Ctrl+Z 撤销</span>';
+    '<span class="lg-hint">单击节点看详情 · 双击直接编辑 · 按住方框拖动位置 · 滚轮缩放 · 空白处拖拽平移 · Ctrl+Z 撤销</span>';
 }
 function updateToolbar() {
   $('btn-undo').disabled = !undoStack.length;
@@ -1086,6 +1295,10 @@ document.querySelectorAll('.tab').forEach((t) => {
 $('btn-add').addEventListener('click', openAdd);
 $('btn-undo').addEventListener('click', undo);
 $('btn-redo').addEventListener('click', redo);
+$('btn-layout').addEventListener('click', () => {
+  if (!Object.keys(state.layout).length) return;
+  commit((st) => { st.layout = {}; });
+});
 $('z-in').addEventListener('click', () => zoomCenter(1.2));
 $('z-out').addEventListener('click', () => zoomCenter(1 / 1.2));
 $('z-fit').addEventListener('click', fitToScreen);
@@ -1143,7 +1356,10 @@ function loadState() {
     const raw = localStorage.getItem(STORE_KEY);
     if (raw) {
       const s = JSON.parse(raw);
-      if (s && s.nodes && s.edges && s.phases) return s;
+      if (s && s.nodes && s.edges && s.phases) {
+        s.layout = s.layout || {};   // 兼容没有 layout 字段的旧存档
+        return s;
+      }
     }
   } catch (e) { /* 存档损坏则用初始数据 */ }
   return deepCopy(INITIAL);
