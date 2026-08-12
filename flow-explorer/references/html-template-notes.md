@@ -117,13 +117,16 @@ classDef decision fill:#FFFFFF,stroke:#00AAAA,color:#1A1F1F,stroke-width:1.5px,s
   ```
 - 内层 `#stage` 承载 SVG，`transform: translate(tx,ty) scale(s)`，`transform-origin: 0 0`
 - `#stage svg { max-width: none !important; width: auto !important; height: auto !important; }`
-- 缩放控件：**绝对定位在视口右上角**（不是 fixed），白底圆角条，含 `[−] [100%] [+] | [⤢ 适应] [⟲ 复位]`，青调阴影
+- 缩放控件：**绝对定位在视口左上角**（不是 fixed；右上角会被悬浮抽屉盖住），白底圆角条，含 `[−] [100%] [+] | [⤢ 适应] [⟲ 复位]`，青调阴影
 - 节点 hover：`filter: brightness(0.97)` + `cursor: pointer`（渲染后统一给 `.node` 加）
 - 首次渲染自动 fit-to-screen；此后重渲染保留用户当前的缩放/平移
 
-### 5. 详情/编辑面板（右侧）
+### 5. 详情/编辑面板（右侧悬浮抽屉）
 
-- 宽约 500px，`flex-shrink: 0`，背景 `#FAFAFC`，左边线 `1px solid var(--line)`
+- **不占布局空间**：`position: absolute; top/right/bottom: 0` 盖在 `.layout` 上，宽约 460px（`max-width: 92vw`），流程图因此始终占满全宽
+- 默认收起：`transform: translateX(calc(100% + 16px))` + `transition: transform .24s`；加 `.open` 类滑出
+- 打开时机：单击节点（查看）、双击节点（编辑）、工具栏新增节点；收起方式：右上 × 按钮、`Esc`、单击流程图空白处（节点点击已 `stopPropagation`，缩放控件也要 `stopPropagation` 防误收）
+- 背景 `#FAFAFC`，左边线 `1px solid var(--line)`，青调浮层阴影（`-18px 0 44px -30px rgba(0,60,70,.22)` 叠加 `--shadow-float`）
 - 左缘 2px 渐变饰条：`::before` 绝对定位，`background: var(--grad)`
 - 三种模式（同一容器切换）：
   - **查看**：节点标题（16px, 700, ink-1）+ 分类 tag 胶囊（分类填充色底/边框色描边）→ `🎯 目的` 与 `⚙️ 处理逻辑` 两个区块（h3 15px/700；正文 `.content` 13px、`var(--ink-2)`、line-height 1.8、`white-space: pre-wrap`）→ 底部按钮行：`编辑节点`（渐变主按钮）、`删除节点`（描边红字）
