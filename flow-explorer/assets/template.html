@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>对讲机组队功能 · 交互流程图</title>
+<title>交互流程图</title>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 <style>
 :root {
@@ -452,139 +452,77 @@ body {
 <script>
 /* ==== FLOW-EXPLORER:DATA:START ==== */
 /* =============================================================
-   ① 文档配置
+   ① 文档配置 —— 每个新流程图只需替换 ①②③ 三段（到 DATA:END 为止），
+      其余全部是通用编辑器引擎，无需改动
    ============================================================= */
 const CONFIG = {
-  titleHtml: '对讲机组队功能 · <em>交互流程全景图</em>',
-  subtitleHtml: '购买连接 / 组队共享 / 在线对讲 / <code>场景 1</code> 无网硬件对讲 / <code>场景 2</code> 非本品牌车加入 &nbsp;——&nbsp; 单击节点查看详情，双击节点直接编辑；基于《对讲机组队功能及无网场景解决方案介绍》（2026-07-31）',
-  docId: 'walkie-talkie-team',
-  exportBaseName: '对讲机组队流程',
-  footerHtml: '对讲机组队功能交互流程 · 2026-08 · 本页面可直接编辑（双击节点改文字 / 拖动方框调整位置 / 工具栏增删节点 / 连线管理改连线），修改自动保存于浏览器本地'
+  titleHtml: '功能名称 · <em>交互流程全景图</em>',     // 页头主标题，<em> 内为主色强调
+  subtitleHtml: '副标题：一句话流程概览，可用 <code>标签</code> 强调关键场景 —— 单击节点查看详情，双击节点直接编辑',
+  docId: 'sample-flow',                                 // 浏览器本地存档标识：每个文档必须唯一，否则互相覆盖
+  exportBaseName: '交互流程',                           // 导出文件名前缀（.mmd / .json）
+  footerHtml: '交互流程 · 本页面可直接编辑（双击节点改文字 / 拖动方框调整位置 / 工具栏增删节点 / 连线管理改连线），修改自动保存于浏览器本地'
 };
 
 /* =============================================================
-   分类色板（NIOFlow 设计系统）
+   ② 分类色板 —— 4–7 类为宜；改 label、按需增删分类，
+      颜色只能从 NIOFlow 色板取（见 references/html-template-notes.md）；
+      「主色青」(#00bebe) 每张图只给一个最核心的分类
    ============================================================= */
 const TAGS = {
-  buy:      { label: '购买 / 硬件流转', border: '#D49922', fill: '#FBF1DA', text: '#4A3A10' },
-  bind:     { label: '连接 / 账号绑定', border: '#5D4DD4', fill: '#ECE9FB', text: '#2A2260' },
-  team:     { label: '组队 / 信息共享', border: '#00bebe', fill: '#D0F5F5', text: '#0B4A4A' },
-  talk:     { label: '在线对讲链路', border: '#3D8090', fill: '#E1EEF1', text: '#1F3E45' },
-  radio:    { label: '无网硬件对讲', border: '#004b64', fill: '#DEF0F4', text: '#00323F' },
-  decision: { label: '判断 / 分支', border: '#00AAAA', fill: '#FFFFFF', text: '#1A1F1F', shape: 'diamond', dashed: true }
+  core:     { label: '核心流程',    border: '#00bebe', fill: '#D0F5F5', text: '#0B4A4A' },
+  infra:    { label: '底层能力',    border: '#004b64', fill: '#DEF0F4', text: '#00323F' },
+  process:  { label: '常规处理',    border: '#3D8090', fill: '#E1EEF1', text: '#1F3E45' },
+  account:  { label: '账号 / 三方', border: '#5D4DD4', fill: '#ECE9FB', text: '#2A2260' },
+  external: { label: '外部动作',    border: '#D49922', fill: '#FBF1DA', text: '#4A3A10' },
+  decision: { label: '判断 / 分支', border: '#00AAAA', fill: '#FFFFFF', text: '#1A1F1F', shape: 'diamond', dashed: true },
+  alert:    { label: '异常 / 降级', border: '#D14545', fill: '#FBE9E9', text: '#5C1D1D' }
 };
 
 /* =============================================================
-   初始数据模型（唯一事实源：图、卡片、连线表都由它生成）
+   ③ 初始流程数据 —— 下面是一个演示流程，展示数据结构，请整体替换：
+      nodes:  id -> { title 标题, tag 分类, purpose 目的, logic 处理逻辑 }
+      edges:  { from, to, label 连线标签(可空), style 'solid'|'dotted' }
+      phases: 阶段分组（流程图 subgraph 与卡片视图都由它决定）
+      layout: 留空 {}，运行时存放手动拖动的位置偏移
    ============================================================= */
 const INITIAL = {
   nodes: {
-    BUY: {
-      title: '商城购买对讲机', tag: 'buy',
-      purpose: '用户在商城完成对讲机硬件的购买，获得组队通信的硬件基础。',
-      logic: '用户在商城下单购买对讲机。\n这是整个组队与无网通信方案的前置条件：后续的车机连接、无网硬件对讲（场景 1）、转交朋友使用（场景 2）都以拿到这台硬件为起点。'
+    START: {
+      title: '用户发起操作', tag: 'core',
+      purpose: '流程的入口：用户在页面上触发本功能。',
+      logic: '演示节点。\n描述触发方式、入参、前置条件等。'
     },
-    PAIR: {
-      title: '车机连接对讲机', tag: 'bind',
-      purpose: '在车机上完成与对讲机硬件的连接配对。',
-      logic: '车机提供专门的连接页面。\n用户拿到对讲机后，在该页面完成与车机的连接；连接建立后才能发起组队。'
+    CHECK: {
+      title: '前置校验是否通过？', tag: 'decision',
+      purpose: '决定走正常处理还是错误分支。',
+      logic: '演示判断节点。\n列出校验项：权限、参数、状态……'
     },
-    TEAM_START: {
-      title: '发起组队', tag: 'team',
-      purpose: '由用户发起，建立车与车之间的小队关系。',
-      logic: '标准的组队流程在两台车之间进行。\n连接建立后由用户发起组队，对方确认后小队关系成立。'
+    PROC: {
+      title: '业务处理', tag: 'process',
+      purpose: '执行本功能的核心逻辑。',
+      logic: '演示节点。\n① 读取数据\n② 执行变更\n③ 写入结果'
     },
-    TEAM_DONE: {
-      title: '组队完成 · 上限50台', tag: 'team',
-      purpose: '小队关系建立，开启信息共享与语音对讲能力。',
-      logic: '组队完成后，小队成为信息共享与语音对讲的载体。\n队伍规模上限为 50 台车。'
+    NOTIFY: {
+      title: '结果通知', tag: 'external',
+      purpose: '把处理结果反馈给用户或下游系统。',
+      logic: '演示节点。\n站内信 / 推送 / 回调等。'
     },
-    SHARE: {
-      title: '小队信息共享', tag: 'team',
-      purpose: '队内实时共享位置与行程信息，方便互相观察。',
-      logic: '共享内容包括：\n① 实时定位\n② 车辆信息\n③ 导航目的地（方便观察队友车辆是否偏离路线）'
-    },
-    PTT: {
-      title: '方向盘按键对讲', tag: 'talk',
-      purpose: '提供「按下即说」的语音对讲入口。',
-      logic: '按下方向盘中间的按键即可开始讲话；讲完再次按下按键确认发送。'
-    },
-    NET_CHECK: {
-      title: '车辆当前是否有网络？', tag: 'decision',
-      purpose: '判定语音走在线云端链路，还是对讲机硬件链路。',
-      logic: '有网 → 走云端分发链路（在线对讲）。\n无网（网络信号复杂的地形）→ 进入场景 1：语音必须经对讲机硬件收发。\n这是组队模式目前最大的痛点：某台车断网后，就收不到其他人发送的信息。'
-    },
-    CLOUD: {
-      title: '云端分发语音', tag: 'talk',
-      purpose: '将语音消息实时分发给小队全部车辆。',
-      logic: '有网场景下，语音经网络上行，由云端向队内所有车辆实时推送。\n无网车辆若处于对讲机组网范围内，可经「有网车辆桥接组网」节点转发获得该语音（见场景 1）。'
-    },
-    ALL_RECV: {
-      title: '全队同时收听播放', tag: 'talk',
-      purpose: '小队所有车辆同时收到并播放这条语音。',
-      logic: '队伍中的所有车辆（上限 50 台）都能同时收到并播放该条语音。'
-    },
-    RADIO_SEND: {
-      title: '语音经对讲机硬件发出', tag: 'radio',
-      purpose: '让无网车辆仍然能对外发送语音。',
-      logic: '无网车辆没有网络上行通道，向外发送语音必须通过对讲机硬件、以无线电方式发出。\n由于是硬件对讲，发出的语音信号可以让通信范围内的其他车辆都接收到。'
-    },
-    RADIO_RECV: {
-      title: '5–8公里内硬件接收', tag: 'radio',
-      purpose: '让无网车辆通过硬件接收队友的语音。',
-      logic: '对讲机的基本通信能力为 5 到 8 公里。\n在该范围内完成组网后，无网车辆经对讲机硬件接收语音，完全不依赖蜂窝网络。'
-    },
-    BRIDGE: {
-      title: '有网车辆桥接组网', tag: 'radio',
-      purpose: '打通硬件链路与在线链路，延展队伍的通信距离。',
-      logic: '在 5–8 公里范围内，只要有一台车有网络，它就可以作为桥接节点。\n桥接节点逐段接力，可以形成一条很长的队伍链：范围内无网用户经硬件收到信号，桥接车辆再把语音带回在线链路。\n↩ 语音经桥接回到「云端分发语音」节点，继续向全队推送（为保持布局稳定，图中不画回边）。'
-    },
-    GIVE: {
-      title: '车主转交对讲机', tag: 'buy',
-      purpose: '让驾驶非本品牌车的同行朋友也能加入通信。',
-      logic: '场景 2：同行朋友的车不是本品牌车辆，不具备组队功能。\n车主可以把车上已有的对讲机硬件交给朋友使用。'
-    },
-    APP_BIND: {
-      title: '下载App绑定新账号', tag: 'bind',
-      purpose: '让这台对讲机具备独立身份，可以加入小队。',
-      logic: '朋友拿到对讲机后，需要下载 App 并绑定一个新的账号。\n绑定成功后，这台对讲机的角色就类似于一套车机系统。'
-    },
-    APP_JOIN: {
-      title: '以对讲机身份加入小队', tag: 'team',
-      purpose: '与车主建立组队关系。',
-      logic: '完成绑定的对讲机可以与车主形成组队关系，享受小队的通信能力。\n这样该功能就能服务于非全部由本品牌车辆组成的车队。'
-    },
-    APP_TALK: {
-      title: 'App远程对讲', tag: 'talk',
-      purpose: '非本品牌车的成员在有网时仍可远距离沟通。',
-      logic: '有网络时，朋友通过 App 与对讲机实现远距离通话，保证团队成员之间的远程沟通。\n注意：同伴的车辆没有集成对讲机硬件，场景 1 的无网通信对其不可用。'
+    FAIL: {
+      title: '错误提示与重试', tag: 'alert',
+      purpose: '校验失败时给出可理解的错误反馈。',
+      logic: '演示异常节点。\n提示原因，并引导用户修正后重试。'
     }
   },
   edges: [
-    { from: 'BUY',        to: 'PAIR',       label: '',            style: 'solid'  },
-    { from: 'PAIR',       to: 'TEAM_START', label: '',            style: 'solid'  },
-    { from: 'TEAM_START', to: 'TEAM_DONE',  label: '两台车之间',  style: 'solid'  },
-    { from: 'TEAM_DONE',  to: 'SHARE',      label: '',            style: 'solid'  },
-    { from: 'TEAM_DONE',  to: 'PTT',        label: '',            style: 'solid'  },
-    { from: 'PTT',        to: 'NET_CHECK',  label: '',            style: 'solid'  },
-    { from: 'NET_CHECK',  to: 'CLOUD',      label: '有网',        style: 'solid'  },
-    { from: 'CLOUD',      to: 'ALL_RECV',   label: '',            style: 'solid'  },
-    { from: 'NET_CHECK',  to: 'RADIO_SEND', label: '无网 · 场景1', style: 'dotted' },
-    { from: 'RADIO_SEND', to: 'RADIO_RECV', label: '',            style: 'solid'  },
-    { from: 'RADIO_RECV', to: 'BRIDGE',     label: '范围内有一台车有网', style: 'solid' },
-    { from: 'BUY',        to: 'GIVE',       label: '场景2 · 朋友的车非本品牌', style: 'dotted' },
-    { from: 'GIVE',       to: 'APP_BIND',   label: '',            style: 'solid'  },
-    { from: 'APP_BIND',   to: 'APP_JOIN',   label: '',            style: 'solid'  },
-    { from: 'APP_JOIN',   to: 'APP_TALK',   label: '有网时',      style: 'solid'  }
+    { from: 'START', to: 'CHECK',  label: '',       style: 'solid'  },
+    { from: 'CHECK', to: 'PROC',   label: '通过',   style: 'solid'  },
+    { from: 'PROC',  to: 'NOTIFY', label: '',       style: 'solid'  },
+    { from: 'CHECK', to: 'FAIL',   label: '未通过', style: 'dotted' }
   ],
   phases: [
-    { id: 'P1', num: '阶段 1', title: '购买与连接',        hint: '硬件到手，车机完成配对',            nodes: ['BUY', 'PAIR'] },
-    { id: 'P2', num: '阶段 2', title: '组队与信息共享',    hint: '两台车成队，位置与行程互见',        nodes: ['TEAM_START', 'TEAM_DONE', 'SHARE'] },
-    { id: 'P3', num: '阶段 3', title: '在线对讲',          hint: '方向盘一键讲话，全队同时收听',      nodes: ['PTT', 'NET_CHECK', 'CLOUD', 'ALL_RECV'] },
-    { id: 'P4', num: '场景 1', title: '无网硬件对讲',      hint: '5–8 公里组网，有网车辆桥接成链',    nodes: ['RADIO_SEND', 'RADIO_RECV', 'BRIDGE'] },
-    { id: 'P5', num: '场景 2', title: '非本品牌车加入',    hint: '对讲机化身车机，App 远程通话',      nodes: ['GIVE', 'APP_BIND', 'APP_JOIN', 'APP_TALK'] }
+    { id: 'P1', num: '阶段 1', title: '发起与校验', hint: '用户触发，系统把关', nodes: ['START', 'CHECK'] },
+    { id: 'P2', num: '阶段 2', title: '处理与反馈', hint: '核心逻辑与结果通知', nodes: ['PROC', 'NOTIFY', 'FAIL'] }
   ],
-  /* 手动拖动产生的位置偏移：id -> {dx, dy}（相对 Mermaid 自动布局的位置） */
   layout: {}
 };
 /* ==== FLOW-EXPLORER:DATA:END ==== */

@@ -2,6 +2,26 @@
 
 本文件是 `flow-explorer` 输出 HTML 的视觉与结构契约。所有颜色、间距、布局、交互都以此为准，不得即兴发挥。
 
+**日常产出流程图不需要读本文件**——直接复制 `assets/template.html` 替换数据区即可（见 SKILL.md 第 5 步）。本文件服务于两类场景：① 需要定制引擎视觉/交互；② 需要重建或大改模板。
+
+## 〇、模板数据契约
+
+`assets/template.html` 中 `/* ==== FLOW-EXPLORER:DATA:START ==== */` 至 `/* ==== FLOW-EXPLORER:DATA:END ==== */` 为数据区，其余为引擎。数据区三段：
+
+```js
+const CONFIG = {
+  titleHtml: '…',        // 页头 h1（innerHTML，<em> 为主色强调），同时派生 document.title
+  subtitleHtml: '…',     // 页头副标题（innerHTML，可用 <code>）
+  docId: '…',            // localStorage key 的一部分：'flow-explorer:' + docId + ':v1'，每文档唯一
+  exportBaseName: '…',   // 导出文件名前缀（.mmd / .json）
+  footerHtml: '…'        // 页脚（innerHTML）
+};
+const TAGS = { key: { label, border, fill, text, shape?: 'diamond', dashed?: true }, … };
+const INITIAL = { nodes: {…}, edges: […], phases: […], layout: {} };
+```
+
+引擎在 init 时把 CONFIG 注入 `#doc-title` / `#doc-subtitle` / `#doc-footer` 与 `document.title`。程序化换数据时，用正则整体替换两个标记之间的内容即可（`examples/对讲机组队-flow.html` 就是这样从模板生成的）。
+
 ## 一、NIOFlow 设计 token
 
 写成 CSS 变量放在 `:root`：
@@ -95,7 +115,7 @@ classDef decision fill:#FFFFFF,stroke:#00AAAA,color:#1A1F1F,stroke-width:1.5px,s
 
 - 白底，底边 `1px solid var(--line)`，`position: sticky; top: 0; z-index: 30`
 - 左侧 tabs：`data-view` 属性切换；激活态背景 `var(--grad)`、白字、圆角 8px；非激活 `var(--ink-3)`，hover 背景 `var(--bg-soft)`
-- 右侧编辑工具按钮：`+ 新增节点`（主按钮，`var(--grad)` 底白字）、`撤销`/`重做`（描边按钮，禁用态 40% 透明度）、`自动布局`（清除全部手动拖动偏移）、`导出 Mermaid`、`导出 JSON`、`重置`（描边按钮，红字用 `#D14545` 仅此一处）
+- 右侧编辑工具按钮：`+ 新增节点`（主按钮，`var(--grad)` 底白字）、`撤销`/`重做`（描边按钮，禁用态 40% 透明度）、`自动布局`（清除全部手动拖动偏移）、`导出 Mermaid`、`导出 JSON`、`导入 JSON`（隐藏 `<input type="file">` 触发，FileReader 读入，校验 nodes/edges/phases 后经 `commit()` 整体替换，可撤销）、`重置`（描边按钮，红字用 `#D14545` 仅此一处）
 - 描边按钮样式：白底、`1px solid var(--line-2)`、`var(--ink-2)` 字、hover 边框变 `var(--accent)`
 
 ### 3. Legend bar
