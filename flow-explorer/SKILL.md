@@ -131,11 +131,11 @@ logic:   多行说明「处理逻辑」（中文，可用 ①②③ 列步骤）
 
 ### 第 7 步（可选）：导出飞书文档
 
-当用户要求「生成飞书文档」「把流程图放进飞书」时执行。**先读 `references/feishu-export.md`**，要点：
+当用户要求「生成飞书文档」「把流程图放进飞书」时执行。**先读 `references/feishu-export.md`**，并遵守它的核心原则——**先探测环境能力，再选路径，逐级降级**，不要假设环境里有浏览器或 block 级 API：
 
-- 飞书文档不能执行 JS，交互版无法内嵌运行——采用三层交付：**结构化正文**（阶段/节点的目的与处理逻辑，从数据模型生成）+ **流程图高清快照**（`node scripts/snapshot.js {文件}.html ./out` 产出 PNG 插入图片块）+ **交互版 HTML 附件**（文件块，下载后浏览器打开即可编辑）
-- 运行环境已有飞书文档工具（MCP/内部封装）时优先用工具；没有才走 reference 里的原始 OpenAPI 流程（建文档 → 批量写块 → 图片/文件三步上传）
-- 正文永远从 nodes/edges/phases 数据模型生成，不要从 HTML 抓取
+- **出图**（选第一条可行的）：A. `python3 scripts/render_png.py data.json flow.png`——零浏览器零外部服务，仅需 Python+Pillow，内部 agent 默认走这条 → B. 有 Chromium 才用 `scripts/snapshot.js` → C. 公司自建 kroki 服务 → D. 无图模式（文档放 mermaid 源码代码块）
+- **写入飞书**（选第一条可行的）：1. 环境的飞书工具是「传 markdown 建文档」类 → 从数据模型生成 `{项目名}-flow.md`（模板见 reference）→ 2. block 级工具或 app 凭证 → 原始 OpenAPI 块结构 → 3. 都没有 → 输出 md + PNG 让用户手动粘贴
+- 三层交付目标：结构化正文（永远可达）+ 流程图图片（能力允许时）+ 交互版 HTML 附件（能力允许时）；正文永远从 nodes/edges/phases 数据模型生成，不要从 HTML 抓取
 
 ## 编辑能力（模板引擎已内置）
 

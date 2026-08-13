@@ -2,109 +2,102 @@
 
 本文件是 SKILL.md「第 7 步：导出飞书文档」的实现参考。
 
-## 核心约束与三层交付架构
+## 核心原则：先探测环境能力，再选路径
 
-**飞书文档不能执行 JavaScript**——交互 HTML（缩放、拖动、编辑）无法在文档内运行。因此导出采用三层结构，缺一不可：
+导出失败几乎都源于假设环境有某种能力（浏览器、block 级 API、公网）。**动手前先确认三件事**，然后按下面两张降级表各选一条可行路径：
 
-| 层 | 载体 | 作用 |
-|---|------|------|
-| ① 结构化正文 | 飞书文档块（标题/高亮块/文本） | 阶段与节点的目的、处理逻辑，可搜索、可评论 |
-| ② 流程图快照 | 高清 PNG 图片块 | 打开文档直接看到全景图 |
-| ③ 交互版 HTML | 文件附件块（或内网托管链接） | 下载后浏览器打开，获得完整编辑能力 |
+1. **出图能力**：`python3 -c "import PIL"` 能否通过（不行就 `pip install pillow`）？有没有 Chromium + Node？
+2. **飞书工具形态**：列出当前环境可用的飞书工具——是「传 markdown 建文档」的高层工具，还是 block 级 API 工具，还是只有 app 凭证？
+3. **图片/附件能力**：飞书工具支不支持上传图片和文件？
 
-> 若公司有内网静态托管（把 HTML 发布成 URL），且该域名已在飞书管理后台加入 iframe 白名单，可以额外插入「内嵌网页」iframe 块直接展示交互版。这是锦上添花项，域名白名单需管理员配置，块类型支持范围以 open.feishu.cn 文档为准——默认方案不依赖它。
+## 三层交付架构（不变的目标形态）
 
-## 前置：优先使用内部 agent 已有的飞书工具
+飞书文档不能执行 JavaScript，交互 HTML 无法内嵌运行。理想交付是三层：**① 结构化正文**（阶段/节点的目的与处理逻辑）+ **② 流程图图片** + **③ 交互版 HTML 附件**（下载后浏览器打开可编辑）。环境能力不足时按下表逐层降级，②③ 可降，① 永远可达。
 
-如果运行环境已经接入了飞书文档工具（MCP 工具、内部封装 API），**直接用这些工具**完成"建文档 → 写正文 → 传图片 → 传附件"，跳过下面的原始 OpenAPI 细节。下述原始接口流程是没有现成工具时的兜底实现。
+## 出图路径（从上往下，选第一条可行的）
 
-## 第 1 步：生成快照
+| 优先级 | 路径 | 依赖 | 说明 |
+|---|------|------|------|
+| **A（默认）** | `scripts/render_png.py` | 仅 Python3 + Pillow + 任一中文字体 | **零浏览器、零外部服务**。从数据 JSON 直接画出 NIO 配色的流程图 PNG（阶段容器、菱形判断、虚线分支、图例、@2x 清晰度）。内部 agent 环境默认走这条 |
+| B | `scripts/snapshot.js` | Node + playwright-core + Chromium | 所见即所得（与交互版完全一致的样式）。有浏览器才用 |
+| C | mermaid 服务端渲染 | 可访问自建 kroki 服务 | `POST {KROKI_URL}/mermaid/png`，body 为「导出 Mermaid」的源码。⚠️ 公网 kroki.io / mermaid.ink 在企业内网通常被拦截，且业务流程外发第三方有信息安全风险——仅在公司自建了渲染服务时用 |
+| D（兜底） | 无图模式 | 无 | 文档里放 mermaid 源码代码块 + 「图片后补」提示，正文信息仍完整 |
 
-HTML 生成并 QA 通过后，用自带脚本产出高清 PNG：
+### 路径 A 用法
 
 ```bash
-npm i playwright-core   # 一次性
-node scripts/snapshot.js {项目名}-flow.html ./out --cards
-# → out/flow.png（流程图全景，视口高度按图的宽高比自适应，@2x 清晰度）
-# → out/cards.png（分阶段卡片视图，可选插入）
-# 离线环境：--mermaid /path/to/mermaid.min.js
-# 浏览器路径：环境变量 CHROMIUM_PATH 指定
+pip install pillow                       # 若未安装
+python3 scripts/render_png.py data.json flow.png [--scale 2] [--max-width 960]
 ```
 
-## 第 2 步：创建飞书文档并写入正文
+`data.json` 与页面「导出 JSON」结构兼容（nodes/edges/phases），可额外加两个字段：`title`（图顶标题）、`tags`（覆盖默认色板，结构同模板 TAGS）。生成 HTML 时顺手把数据模型另存一份 JSON 即可，**不要从 HTML 里抓取**。
 
-原始 OpenAPI（需 tenant_access_token，权限 `docx:document` + `drive:drive`；下述块类型编号以 open.feishu.cn 最新文档为准）：
+字体问题：脚本自动搜索常见中文字体（文泉驿/Noto CJK/苹方/微软雅黑）；都没有时报错提示 `apt-get install fonts-wqy-zenhei`，或用 `--font 路径` / 环境变量 `FONT_PATH` 指定。
 
-```
-POST /open-apis/docx/v1/documents          # 建文档 {title, folder_token?} → document_id
-POST /open-apis/docx/v1/documents/{document_id}/blocks/{document_id}/children
-                                           # 根块 id 即 document_id；一次最多 50 个块
-```
+## 飞书写入路径（从上往下，选第一条可行的）
 
-**推荐的文档结构**（从 `state` 数据模型直接生成）：
+### 1. markdown 级工具（最常见——内部飞书集成大多是这种）
 
-```
-📄 {CONFIG.titleHtml 的纯文本} 
-├─ 高亮块(callout)：一句话说明 + 「文末附件为可编辑交互版，下载后浏览器打开」
-├─ H1 流程总览
-│   └─ 图片块：flow.png
-├─ H1 分阶段说明
-│   ├─ H2 {phase.num} · {phase.title}（{phase.hint}）
-│   │   ├─ H3 {node.title}   [分类：{TAGS[node.tag].label}]
-│   │   ├─ 文本：🎯 目的：{node.purpose}
-│   │   └─ 文本：⚙️ 处理逻辑：{node.logic}（多行拆成多个文本块）
-│   └─ …每个阶段重复
-├─ H1 交互版附件
-│   ├─ 文件块：{项目名}-flow.html
-│   └─ 文本：使用说明（双击节点改文字 / 拖动方框 / 连线管理 / 导出 JSON 协作）
-```
+从数据模型生成 `{项目名}-flow.md`，直接喂给「用 markdown 创建飞书文档」类工具。模板：
 
-文本块示例（children 数组中的一个元素）：
+```markdown
+# {标题}
 
-```json
-{ "block_type": 2, "text": { "elements": [
-    { "text_run": { "content": "🎯 目的：用户在商城完成对讲机硬件的购买。" } }
-] } }
+> 💡 本文档由 flow-explorer 生成。文末附可编辑交互版，下载后浏览器打开：
+> 双击节点改文字 / 拖动方框 / 增删连线，改完「导出 JSON」回传接力。
+
+## 流程总览
+
+![流程图](flow.png)          <!-- 按工具能力三选一：本地路径（工具自动上传）/
+                                  先传图拿 URL / 都不支持 → 换成 mermaid 代码块 -->
+
+## 阶段 1 · {phase.title}（{phase.hint}）
+
+### {node.title}  `{分类 label}`
+- 🎯 目的：{node.purpose}
+- ⚙️ 处理逻辑：{node.logic 各行}
+
+（每个节点、每个阶段重复）
+
+## 交互版
+{附件或链接；工具不支持文件时，写「HTML 已存至 {位置}」}
 ```
 
-标题块用 `block_type` 3/4/5（H1/H2/H3），结构同上。高亮块（callout）带子块，需用 `.../blocks/{block_id}/descendant` 接口一次性创建嵌套结构。
+图片的三种情形：工具支持本地图片路径（自动上传）→ 直接引用；工具要 URL → 先用飞书素材/云空间接口传图拿链接；都不行 → 该节改为 mermaid 源码代码块（无图模式）。
 
-## 第 3 步：插入图片（三步流程，顺序固定）
+### 2. block 级工具 / 原始 OpenAPI（有 app 凭证时的兜底）
 
-飞书 docx 插图必须"先建空块、再传素材、最后回填 token"：
-
-```
-1. children 接口创建空图片块：{ "block_type": 27, "image": {} } → 得到 image_block_id
-2. POST /open-apis/drive/v1/medias/upload_all   (multipart)
-     file_name=flow.png, parent_type=docx_image,
-     parent_node={image_block_id}, size=..., file=<二进制>
-   → 得到 file_token
-3. PATCH /open-apis/docx/v1/documents/{document_id}/blocks/{image_block_id}
-     { "replace_image": { "token": "{file_token}" } }
-```
-
-## 第 4 步：插入交互版 HTML 附件
-
-与图片同构的三步，换成文件块：
+权限 `docx:document` + `drive:drive`，tenant_access_token。块类型编号以 open.feishu.cn 最新文档为准：
 
 ```
-1. children 接口创建空文件块：{ "block_type": 23, "file": {} } → file_block_id
-2. medias/upload_all：parent_type=docx_file, parent_node={file_block_id}, file=<HTML 二进制>
-3. PATCH 该块 { "replace_file": { "token": "{file_token}" } }
+POST /open-apis/docx/v1/documents                    # 建文档 → document_id
+POST .../documents/{doc_id}/blocks/{doc_id}/children # 批量写块，一次 ≤50 个
 ```
 
-> 团队协作提示写进文档：编辑完的人用页面里「导出 JSON」把数据发回来，任何人「导入 JSON」即可接力编辑；改完的 HTML 也可重新上传替换附件。
+文本块 `{"block_type": 2, "text": {"elements": [{"text_run": {"content": "..."}}]}}`；标题 H1/H2/H3 为 block_type 3/4/5；高亮块（callout）带子块需用 `.../blocks/{block_id}/descendant` 接口。
 
-## 第 5 步：QA 清单
+**图片三步**（顺序固定）：① children 建空图片块 `{"block_type": 27, "image": {}}` → ② `POST /open-apis/drive/v1/medias/upload_all`（multipart：`parent_type=docx_image`, `parent_node={image_block_id}`, file）拿 file_token → ③ `PATCH .../blocks/{image_block_id}` 提交 `{"replace_image": {"token": ...}}`。
 
-- 文档标题、阶段数、节点数与 `state` 一致（逐项生成，勿手写）
-- flow.png 在文档中清晰可读（列宽窄的文档场景可把 `--width` 降到 1440）
-- 附件可下载、下载后浏览器打开可编辑
-- 高亮块中的"可编辑交互版"指引存在
-- 接口限频：children 批量建块一次 ≤50 块；大文档分批写入
+**HTML 附件三步**：同构，空文件块 `{"block_type": 23, "file": {}}` + `parent_type=docx_file` + `replace_file`。
 
-## 生成时给 Claude 的实现建议
+### 3. 什么都没有
 
-- 写一个一次性脚本（Python/Node 均可）串起 1–4 步，输入是 `{项目名}-flow.html` + 导出的 JSON（或直接从 HTML 的 DATA 区解析 `INITIAL`），输出飞书文档 URL
-- 文档正文从**数据模型**生成而不是从 HTML 抓取——nodes/edges/phases 就是唯一事实源
-- token、app_id/secret 走环境变量，不要写进脚本
+输出 markdown 文件 + PNG 交给用户，说明「把 md 内容粘贴到飞书文档、图片手动拖入」。这是最后一档，正文信息依然完整。
+
+## 故障排查
+
+| 症状 | 处理 |
+|------|------|
+| 出图失败：`No module named PIL` | `pip install pillow`；不能装则降到路径 D 无图模式 |
+| 出图失败：找不到中文字体 | `apt-get install fonts-wqy-zenhei` 或 `--font` 指定；报错信息里有提示 |
+| snapshot.js 失败 | 十有八九是没有 Chromium——不要恋战，直接换路径 A |
+| 建不了文档 | 先让 agent 列出自己实际可用的飞书工具名和参数，再对号入座选写入路径；不要假设有 block 级 API |
+| 图片插不进文档 | 工具不支持图片 → 图传云空间拿链接放正文；再不行 → 无图模式 |
+| 附件传不上 | HTML 存到共享位置，正文放路径/链接说明 |
+
+## QA 清单
+
+- 文档标题、阶段数、节点数与数据模型一致（逐项生成，勿手写）
+- 图片在文档中清晰可读（PNG 过宽时 `--max-width 760` 让布局更窄更高）
+- 若有附件：可下载、下载后浏览器打开可编辑
+- 正文包含「可编辑交互版」的获取方式说明（附件/链接/存放位置，三选一必有）
