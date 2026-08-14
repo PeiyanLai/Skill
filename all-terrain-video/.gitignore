@@ -1,0 +1,6 @@
+node_modules/
+.remotion/
+
+# 渲染产物不入库，只保留成片本身
+out/*
+!out/all-terrain-mode.mp4
