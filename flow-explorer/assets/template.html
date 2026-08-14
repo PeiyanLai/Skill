@@ -558,7 +558,7 @@ function escapeHtml(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 function deepCopy(o) { return JSON.parse(JSON.stringify(o)); }
-function tagOf(n) { return TAGS[n.tag] || TAGS.team; }
+function tagOf(n) { return TAGS[n.tag] || TAGS.core || Object.values(TAGS)[0]; }
 
 /* =============================================================
    数据 → Mermaid 源码
@@ -634,8 +634,7 @@ let edgeLayer = null;  // 自绘连线所在的 <g>
 
 async function renderFlow() {
   if (!window.mermaid) {
-    stage.style.transform = 'none';
-    stage.innerHTML = '<div class="render-err">Mermaid 库加载失败（无网络或 CDN 不可达）。流程图无法渲染，但「分阶段卡片」「连线管理」两个视图仍可正常使用。</div>';
+    renderFallbackFlow();
     return;
   }
   try {
@@ -650,9 +649,113 @@ async function renderFlow() {
     if (!view.fitted) { fitToScreen(); view.fitted = true; }
     else applyTransform();
   } catch (err) {
-    stage.style.transform = 'none';
-    stage.innerHTML = '<div class="render-err">流程图渲染失败：' + escapeHtml(err && err.message ? err.message : err) + '</div>';
+    /* Mermaid 在内网、file:// 或 CDN 受限环境下不可用时，不能让整张图留白。
+       回退到内置原生 SVG 引擎：仍支持查看、拖拽、编辑、连线和高清导出。 */
+    renderFallbackFlow();
   }
+}
+
+/* =============================================================
+   无 Mermaid 回退渲染器
+   只使用浏览器原生 SVG，不依赖 CDN，因此本地 file://、内网 Agent 和离线
+   下载后的 HTML 都至少能正常打开一张可编辑流程图。
+   ============================================================= */
+function fallbackSvgEl(tag, attrs) {
+  const el = document.createElementNS(SVG_NS, tag);
+  Object.entries(attrs || {}).forEach(([k, v]) => el.setAttribute(k, v));
+  return el;
+}
+function fallbackLines(text, maxChars) {
+  const raw = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!raw) return [''];
+  const out = [];
+  for (let i = 0; i < raw.length; i += maxChars) out.push(raw.slice(i, i + maxChars));
+  return out.slice(0, 2);
+}
+function fallbackText(parent, x, y, lines, attrs) {
+  const text = fallbackSvgEl('text', attrs || {});
+  lines.forEach((line, i) => {
+    const span = fallbackSvgEl('tspan', { x: x, y: y + i * 17 });
+    span.textContent = line;
+    text.appendChild(span);
+  });
+  parent.appendChild(text);
+  return text;
+}
+function buildFallbackSvg() {
+  const width = 1100, margin = 54, gapX = 28, nodeW = 235, nodeH = 92;
+  const svg = fallbackSvgEl('svg', { xmlns: SVG_NS, viewBox: '0 0 ' + width + ' 720', width: width, height: 720 });
+  svg.appendChild(fallbackSvgEl('rect', { x: 0, y: 0, width: width, height: 720, fill: '#FFFFFF' }));
+  const nodesGroup = fallbackSvgEl('g', { class: 'nodes' });
+  const phases = (state && state.phases) || [];
+  const nodeMap = (state && state.nodes) || {};
+  let y = 46;
+  if (!Object.keys(nodeMap).length) {
+    fallbackText(svg, 52, 78, ['未检测到流程节点。请重新生成 HTML，确保 INITIAL.nodes / edges / phases 已填入需求数据。'], {
+      fill: '#D14545', 'font-size': 15, 'font-family': 'sans-serif'
+    });
+    return svg;
+  }
+  phases.forEach((phase) => {
+    const ids = (phase.nodes || []).filter((id) => nodeMap[id]);
+    if (!ids.length) return;
+    const cols = Math.min(3, Math.max(1, Math.ceil(Math.sqrt(ids.length))));
+    const rows = Math.ceil(ids.length / cols);
+    const phaseW = Math.min(width - margin * 2, cols * nodeW + (cols - 1) * gapX + 44);
+    const phaseH = 52 + rows * nodeH + (rows - 1) * 28 + 30;
+    const px = (width - phaseW) / 2;
+    const cluster = fallbackSvgEl('g', { id: phase.id, class: 'cluster' });
+    cluster.appendChild(fallbackSvgEl('rect', {
+      x: px, y: y, width: phaseW, height: phaseH, rx: 14,
+      fill: '#F7FCFC', stroke: '#B8DEDE', 'stroke-width': 1.5, 'stroke-dasharray': '5 4'
+    }));
+    const label = fallbackText(cluster, px + 16, y + 27, [String(phase.num || '') + ' · ' + String(phase.title || '')], {
+      class: 'cluster-label', fill: '#5C7070', 'font-size': 13, 'font-weight': 600, 'font-family': 'sans-serif'
+    });
+    svg.appendChild(cluster);
+    ids.forEach((id, index) => {
+      const n = nodeMap[id], col = index % cols, row = Math.floor(index / cols);
+      const nx = px + 22 + col * (nodeW + gapX), ny = y + 54 + row * (nodeH + 28);
+      const tag = tagOf(n);
+      const g = fallbackSvgEl('g', {
+        id: 'flowchart-' + id + '-fallback', class: 'node', transform: 'translate(' + (nx + nodeW / 2) + ',' + (ny + nodeH / 2) + ')'
+      });
+      const shape = tag.shape === 'diamond'
+        ? fallbackSvgEl('path', { d: 'M0,-42 L92,0 L0,42 L-92,0 Z', fill: tag.fill, stroke: tag.border, 'stroke-width': 1.8 })
+        : fallbackSvgEl('rect', { x: -nodeW / 2, y: -nodeH / 2, width: nodeW, height: nodeH, rx: 10, fill: tag.fill, stroke: tag.border, 'stroke-width': 1.8 });
+      g.appendChild(shape);
+      fallbackText(g, 0, -12, fallbackLines(n.title, 14), {
+        fill: tag.text, 'font-size': 14, 'font-weight': 600, 'font-family': 'sans-serif', 'text-anchor': 'middle'
+      });
+      fallbackText(g, 0, 27, fallbackLines(n.purpose, 18).slice(0, 1), {
+        fill: '#5C7070', 'font-size': 11.5, 'font-family': 'sans-serif', 'text-anchor': 'middle'
+      });
+      nodesGroup.appendChild(g);
+    });
+    y += phaseH + 30;
+  });
+  /* 未分组节点仍需可见 */
+  const grouped = new Set(phases.flatMap((p) => p.nodes || []));
+  Object.keys(nodeMap).filter((id) => !grouped.has(id)).forEach((id, index) => {
+    const n = nodeMap[id], tag = tagOf(n), x = margin + (index % 3) * (nodeW + gapX), yy = y + Math.floor(index / 3) * 120;
+    const g = fallbackSvgEl('g', { id: 'flowchart-' + id + '-fallback', class: 'node', transform: 'translate(' + (x + nodeW / 2) + ',' + (yy + nodeH / 2) + ')' });
+    g.appendChild(fallbackSvgEl('rect', { x: -nodeW / 2, y: -nodeH / 2, width: nodeW, height: nodeH, rx: 10, fill: tag.fill, stroke: tag.border, 'stroke-width': 1.8 }));
+    fallbackText(g, 0, -12, fallbackLines(n.title, 14), { fill: tag.text, 'font-size': 14, 'font-weight': 600, 'font-family': 'sans-serif', 'text-anchor': 'middle' });
+    fallbackText(g, 0, 27, fallbackLines(n.purpose, 18).slice(0, 1), { fill: '#5C7070', 'font-size': 11.5, 'font-family': 'sans-serif', 'text-anchor': 'middle' });
+    nodesGroup.appendChild(g);
+  });
+  svg.setAttribute('viewBox', '0 0 ' + width + ' ' + Math.max(260, y + 36));
+  svg.setAttribute('height', Math.max(260, y + 36));
+  svg.appendChild(nodesGroup);
+  return svg;
+}
+function renderFallbackFlow() {
+  stage.innerHTML = '';
+  const svg = buildFallbackSvg();
+  stage.appendChild(svg);
+  if (Object.keys((state && state.nodes) || {}).length) setupScene(svg);
+  if (!view.fitted) { fitToScreen(); view.fitted = true; }
+  else applyTransform();
 }
 
 function setupScene(svg) {
