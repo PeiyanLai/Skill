@@ -90,5 +90,5 @@ Claude Agent SDK（`claude-agent-sdk` / `@anthropic-ai/claude-agent-sdk`）复�
 ## 注意事项
 
 - **QA 步骤按环境降级**：SKILL.md 第 6 步要求无头浏览器验证。Claude Code / Agent SDK 环境有浏览器可完整执行；Messages API 代码执行容器没有浏览器，该步骤退化为 `node --check` 语法校验 + 人工在本地浏览器打开验收。
-- **产物依赖 CDN**：生成的 HTML 通过 CDN 加载 mermaid，接收方需联网打开；内网隔离环境可把 `mermaid.min.js` 内联进文件。
+- **Mermaid 为可选增强**：生成的 HTML 会尝试加载 Mermaid 以获得自动布局；CDN 不可达、内网隔离或本地 `file://` 打开时，会自动使用内置原生 SVG 引擎，流程图仍可查看、编辑与导出。无需将 Mermaid 内联才能使用。
 - **版本更新**：skill 内容迭代后，方式二直接 git 更新即可；方式三需要 `client.beta.skills.versions.create(...)` 发新版本（引用 `"version": "latest"` 的 agent 自动拿到新版）。
