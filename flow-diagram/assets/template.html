@@ -1464,81 +1464,166 @@ html, body { height: 100%; }
     setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
   });
 
-  /* ── 高清图片导出：把当前画布（含节点、分区与连线）渲染成 3× PNG ── */
+  /* ── 高清图片导出：原生 SVG → 3× PNG，不依赖 foreignObject ─────── */
+  function exportSvgEl(tag, attrs) {
+    var el = document.createElementNS(NS, tag);
+    Object.keys(attrs || {}).forEach(function (key) { el.setAttribute(key, attrs[key]); });
+    return el;
+  }
+  function exportText(parent, x, y, value, attrs) {
+    var el = exportSvgEl("text", attrs || {});
+    el.setAttribute("x", x);
+    el.setAttribute("y", y);
+    el.textContent = value;
+    parent.appendChild(el);
+    return el;
+  }
+  function exportPill(parent, x, y, label, fill, stroke, color) {
+    var fontSize = 10;
+    var width = Math.max(25, label.replace(/[^\x00-\xff]/g, "xx").length * 5.7 + 15);
+    parent.appendChild(exportSvgEl("rect", {
+      x: x, y: y, width: width, height: 18, rx: 5,
+      fill: fill, stroke: stroke, "stroke-width": 1
+    }));
+    exportText(parent, x + 7, y + 12.2, label, {
+      fill: color, "font-size": fontSize, "font-family": "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+    });
+    return width;
+  }
+  function buildNativeExportSvg() {
+    var root = getComputedStyle(document.documentElement);
+    var bg = root.getPropertyValue("--bg").trim() || "#F0FAFA";
+    var card = root.getPropertyValue("--card").trim() || "#FFFFFF";
+    var line = root.getPropertyValue("--line").trim() || "#D8EEEE";
+    var line2 = root.getPropertyValue("--line-2").trim() || "#B8DEDE";
+    var ink1 = root.getPropertyValue("--ink-1").trim() || "#1A1F1F";
+    var ink3 = root.getPropertyValue("--ink-3").trim() || "#5C7070";
+    var ink4 = root.getPropertyValue("--ink-4").trim() || "#8AABAB";
+    var soft = root.getPropertyValue("--soft").trim() || "#D0F5F5";
+    var sage = root.getPropertyValue("--sage").trim() || "#004b64";
+    var svgOut = exportSvgEl("svg", {
+      xmlns: NS, width: CW, height: CH, viewBox: "0 0 " + CW + " " + CH
+    });
+    svgOut.appendChild(exportSvgEl("rect", { x: 0, y: 0, width: CW, height: CH, fill: bg }));
+    var defs = exportSvgEl("defs");
+    var marker = exportSvgEl("marker", {
+      id: "export-arrow", markerWidth: 8, markerHeight: 8, refX: 6.5, refY: 4, orient: "auto-start-reverse"
+    });
+    marker.appendChild(exportSvgEl("path", {
+      d: "M1 1 L7 4 L1 7", fill: "none", stroke: line2, "stroke-width": 1.6, "stroke-linecap": "round"
+    }));
+    defs.appendChild(marker);
+    svgOut.appendChild(defs);
+
+    /* 分区 */
+    ZONES.forEach(function (zn) {
+      if (!zn.el || zn.el.style.display === "none") return;
+      var left = zn.el.offsetLeft, top = zn.el.offsetTop, width = zn.el.offsetWidth, height = zn.el.offsetHeight;
+      svgOut.appendChild(exportSvgEl("rect", {
+        x: left, y: top, width: width, height: height, rx: 14,
+        fill: "rgba(0,190,190,0.03)", stroke: line2, "stroke-width": 1.5, "stroke-dasharray": "5 4"
+      }));
+      var zl = zn.el.querySelector(".zl");
+      exportText(svgOut, left + 14, top + 25, zl ? zl.textContent : "", {
+        fill: ink4, "font-size": 11, "font-family": "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace", "letter-spacing": "1.1px"
+      });
+    });
+
+    /* 连线：直接复用当前页面已经计算好的 path 数据 */
+    EDGES.forEach(function (e) {
+      if (!e.p) return;
+      var pStyle = getComputedStyle(e.p);
+      var edgeOpacity = e.g ? getComputedStyle(e.g).opacity : "1";
+      svgOut.appendChild(exportSvgEl("path", {
+        d: e.p.getAttribute("d"), fill: "none", stroke: pStyle.stroke || line2,
+        "stroke-width": pStyle.strokeWidth || 1.8, opacity: edgeOpacity, "marker-end": "url(#export-arrow)"
+      }));
+      if (e.tx) {
+        exportText(svgOut, e.tx.getAttribute("x"), e.tx.getAttribute("y"), e.tx.textContent || "", {
+          fill: ink3, "font-size": 10.5, "font-family": "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+          "text-anchor": "middle", stroke: card, "stroke-width": 5, "paint-order": "stroke", opacity: edgeOpacity
+        });
+      }
+    });
+
+    /* 节点：用当前 DOM 的真实尺寸与颜色重画，因此会保留拖拽后的终版布局和改过的文字。 */
+    NODES.forEach(function (n) {
+      if (!n.el) return;
+      var el = n.el, cs = getComputedStyle(el), x = n.x, y = n.y, w = el.offsetWidth, h = el.offsetHeight;
+      var opacity = cs.opacity || "1";
+      var dashed = cs.borderTopStyle === "dashed";
+      svgOut.appendChild(exportSvgEl("rect", {
+        x: x, y: y, width: w, height: h, rx: 10, fill: cs.backgroundColor || card,
+        stroke: cs.borderTopColor || line2, "stroke-width": cs.borderTopWidth || 1,
+        opacity: opacity, "stroke-dasharray": dashed ? "5 3" : ""
+      }));
+      svgOut.appendChild(exportSvgEl("path", {
+        d: "M" + (x + 2) + " " + (y + 8) + " V" + (y + h - 8),
+        fill: "none", stroke: cs.borderLeftColor || line2, "stroke-width": cs.borderLeftWidth || 4,
+        "stroke-linecap": "round", opacity: opacity
+      }));
+      var title = el.querySelector("h4"), subtitle = el.querySelector(".ns"), row = el.querySelector(".nrow");
+      var titleX = x + 12;
+      if (n.kind === "pain") {
+        svgOut.appendChild(exportSvgEl("circle", { cx: x + 16, cy: y + 17, r: 3.5, fill: root.getPropertyValue("--neg").trim() || "#D14545", opacity: opacity }));
+        titleX += 12;
+      }
+      exportText(svgOut, titleX, y + (title ? title.offsetTop : 9) + 14, n.t, {
+        fill: ink1, "font-size": 13.5, "font-family": getComputedStyle(document.body).fontFamily,
+        "font-weight": 600, opacity: opacity
+      });
+      if (subtitle) {
+        exportText(svgOut, x + 12, y + subtitle.offsetTop + 12, n.s || "", {
+          fill: ink3, "font-size": 11.5, "font-family": getComputedStyle(document.body).fontFamily, opacity: opacity
+        });
+      }
+      if (row) {
+        var pillX = x + 12, pillY = y + row.offsetTop;
+        var uKey = n.u.indexOf("team") >= 0 || n.u.length > 1 ? "team" : n.u[0];
+        var userLabel = USERS[uKey] ? USERS[uKey].name : "全体成员";
+        pillX += exportPill(svgOut, pillX, pillY, userLabel, soft, line2, sage) + 4;
+        n.deps.slice(0, 2).forEach(function (dep) {
+          pillX += exportPill(svgOut, pillX, pillY, dep, bg, line2, ink3) + 4;
+        });
+        if (n.deps.length > 2) exportPill(svgOut, pillX, pillY, "+" + (n.deps.length - 2), bg, line2, ink3);
+      }
+    });
+    return svgOut;
+  }
   function exportHighResPng() {
     var btn = document.getElementById("exportImageBtn");
     if (btn.disabled) return;
     var originalText = btn.textContent;
     btn.disabled = true;
     btn.textContent = "正在生成…";
-
-    /* 用克隆画布生成快照，避免导出过程改变用户正在编辑的页面。保留筛选状态，
-       但移除临时选中态与鼠标交互样式，使导出的图片可直接用于评审或文档。 */
-    var snapshot = canvas.cloneNode(true);
-    snapshot.removeAttribute("id");
-    snapshot.style.transform = "none";
-    snapshot.style.transformOrigin = "0 0";
-    snapshot.style.width = CW + "px";
-    snapshot.style.height = CH + "px";
-    Array.prototype.forEach.call(snapshot.querySelectorAll(".sel"), function (el) {
-      el.classList.remove("sel");
-    });
-    snapshot.classList.remove("linking");
-
-    /*
-       不能把 <!doctype>/<html>/<head>/<body> 嵌进 SVG 的 foreignObject。
-       那会生成非 XML 合法的 SVG，在 file:// 打开时 Chrome 常以 image.onerror
-       结束，表现为「导出失败」。这里只嵌入一个合法 XHTML <div> 片段。
-       同时把根节点 token 写到快照上，避免 :root 在 foreignObject 内失效。
-    */
-    var rootStyle = getComputedStyle(document.documentElement);
-    for (var i = 0; i < rootStyle.length; i++) {
-      var prop = rootStyle[i];
-      if (prop.indexOf("--") === 0) snapshot.style.setProperty(prop, rootStyle.getPropertyValue(prop));
-    }
-    var styleText = document.querySelector("style").textContent;
-    var pageBackground = getComputedStyle(document.body).backgroundColor || "#f6f8fa";
-    var fontFamily = getComputedStyle(document.body).fontFamily || "sans-serif";
-    var xhtml = '<div xmlns="http://www.w3.org/1999/xhtml" style="width:' + CW + 'px;height:' + CH +
-      'px;overflow:hidden;background:' + pageBackground + ';font-family:' + fontFamily + ';">' +
-      '<style>' + styleText + ' .canvas{transform:none!important;}</style>' +
-      snapshot.outerHTML + '</div>';
-    var svgText = '<svg xmlns="http://www.w3.org/2000/svg" width="' + CW + '" height="' + CH +
-      '" viewBox="0 0 ' + CW + ' ' + CH + '"><foreignObject width="100%" height="100%">' +
-      xhtml + '</foreignObject></svg>';
-    var svgUrl = URL.createObjectURL(new Blob([svgText], { type: "image/svg+xml;charset=utf-8" }));
-    var image = new Image();
-    image.onload = function () {
-      try {
-        var scale = 3;
-        var out = document.createElement("canvas");
-        out.width = Math.round(CW * scale);
-        out.height = Math.round(CH * scale);
-        var ctx = out.getContext("2d");
-        if (!ctx) throw new Error("浏览器不支持 Canvas 导出");
-        ctx.scale(scale, scale);
-        ctx.drawImage(image, 0, 0, CW, CH);
-        URL.revokeObjectURL(svgUrl);
-        out.toBlob(function (blob) {
-          if (!blob) { finish(new Error("浏览器未能生成 PNG")); return; }
-          var a = document.createElement("a");
-          a.href = URL.createObjectURL(blob);
-          a.download = "flow-diagram-" + new Date().toISOString().slice(0, 10) + ".png";
-          a.click();
-          setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
-          finish();
-        }, "image/png");
-      } catch (err) {
-        URL.revokeObjectURL(svgUrl);
-        finish(err);
-      }
-    };
-    image.onerror = function () {
-      URL.revokeObjectURL(svgUrl);
-      finish(new Error("画布快照加载失败"));
-    };
-    image.src = svgUrl;
-
+    try {
+      var nativeSvg = buildNativeExportSvg();
+      var serialized = new XMLSerializer().serializeToString(nativeSvg);
+      var image = new Image();
+      image.onload = function () {
+        try {
+          var scale = Math.max(1, Math.min(3, 8000 / CW, 8000 / CH));
+          var out = document.createElement("canvas");
+          out.width = Math.round(CW * scale);
+          out.height = Math.round(CH * scale);
+          var ctx = out.getContext("2d");
+          if (!ctx) throw new Error("浏览器不支持 Canvas 导出");
+          ctx.drawImage(image, 0, 0, out.width, out.height);
+          out.toBlob(function (blob) {
+            if (!blob) { finish(new Error("浏览器未能生成 PNG")); return; }
+            var a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = "flow-diagram-" + new Date().toISOString().slice(0, 10) + ".png";
+            a.click();
+            setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+            finish();
+          }, "image/png");
+        } catch (err) { finish(err); }
+      };
+      image.onerror = function () { finish(new Error("浏览器无法读取导出图像")); };
+      /* data URL 在本地 file:// 页面也能加载；导出 SVG 只含原生图元，没有 HTML 或外部资源。 */
+      image.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(serialized);
+    } catch (err) { finish(err); }
     function finish(err) {
       btn.disabled = false;
       btn.textContent = originalText;
