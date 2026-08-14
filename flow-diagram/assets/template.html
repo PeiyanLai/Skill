@@ -1485,36 +1485,53 @@ html, body { height: 100%; }
     });
     snapshot.classList.remove("linking");
 
+    /*
+       不能把 <!doctype>/<html>/<head>/<body> 嵌进 SVG 的 foreignObject。
+       那会生成非 XML 合法的 SVG，在 file:// 打开时 Chrome 常以 image.onerror
+       结束，表现为「导出失败」。这里只嵌入一个合法 XHTML <div> 片段。
+       同时把根节点 token 写到快照上，避免 :root 在 foreignObject 内失效。
+    */
+    var rootStyle = getComputedStyle(document.documentElement);
+    for (var i = 0; i < rootStyle.length; i++) {
+      var prop = rootStyle[i];
+      if (prop.indexOf("--") === 0) snapshot.style.setProperty(prop, rootStyle.getPropertyValue(prop));
+    }
     var styleText = document.querySelector("style").textContent;
     var pageBackground = getComputedStyle(document.body).backgroundColor || "#f6f8fa";
-    var html = '<!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml"><head><meta charset="utf-8" />' +
-      '<style>' + styleText + '</style>' +
-      '<style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:' + pageBackground + ';}' +
-      '.canvas{transform:none!important;}</style></head><body>' +
-      snapshot.outerHTML + '</body></html>';
+    var fontFamily = getComputedStyle(document.body).fontFamily || "sans-serif";
+    var xhtml = '<div xmlns="http://www.w3.org/1999/xhtml" style="width:' + CW + 'px;height:' + CH +
+      'px;overflow:hidden;background:' + pageBackground + ';font-family:' + fontFamily + ';">' +
+      '<style>' + styleText + ' .canvas{transform:none!important;}</style>' +
+      snapshot.outerHTML + '</div>';
     var svgText = '<svg xmlns="http://www.w3.org/2000/svg" width="' + CW + '" height="' + CH +
       '" viewBox="0 0 ' + CW + ' ' + CH + '"><foreignObject width="100%" height="100%">' +
-      html + '</foreignObject></svg>';
+      xhtml + '</foreignObject></svg>';
     var svgUrl = URL.createObjectURL(new Blob([svgText], { type: "image/svg+xml;charset=utf-8" }));
     var image = new Image();
     image.onload = function () {
-      var scale = 3;
-      var out = document.createElement("canvas");
-      out.width = Math.round(CW * scale);
-      out.height = Math.round(CH * scale);
-      var ctx = out.getContext("2d");
-      ctx.scale(scale, scale);
-      ctx.drawImage(image, 0, 0, CW, CH);
-      URL.revokeObjectURL(svgUrl);
-      out.toBlob(function (blob) {
-        if (!blob) { finish(new Error("浏览器未能生成 PNG")); return; }
-        var a = document.createElement("a");
-        a.href = URL.createObjectURL(blob);
-        a.download = "flow-diagram-" + new Date().toISOString().slice(0, 10) + ".png";
-        a.click();
-        setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
-        finish();
-      }, "image/png");
+      try {
+        var scale = 3;
+        var out = document.createElement("canvas");
+        out.width = Math.round(CW * scale);
+        out.height = Math.round(CH * scale);
+        var ctx = out.getContext("2d");
+        if (!ctx) throw new Error("浏览器不支持 Canvas 导出");
+        ctx.scale(scale, scale);
+        ctx.drawImage(image, 0, 0, CW, CH);
+        URL.revokeObjectURL(svgUrl);
+        out.toBlob(function (blob) {
+          if (!blob) { finish(new Error("浏览器未能生成 PNG")); return; }
+          var a = document.createElement("a");
+          a.href = URL.createObjectURL(blob);
+          a.download = "flow-diagram-" + new Date().toISOString().slice(0, 10) + ".png";
+          a.click();
+          setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+          finish();
+        }, "image/png");
+      } catch (err) {
+        URL.revokeObjectURL(svgUrl);
+        finish(err);
+      }
     };
     image.onerror = function () {
       URL.revokeObjectURL(svgUrl);
@@ -1527,7 +1544,7 @@ html, body { height: 100%; }
       btn.textContent = originalText;
       if (err) {
         console.error(err);
-        window.alert("导出失败，请刷新页面后重试。");
+        window.alert("导出失败：" + (err && err.message ? err.message : "请刷新页面后重试。"));
       }
     }
   }
