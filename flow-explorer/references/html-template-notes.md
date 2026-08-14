@@ -115,7 +115,7 @@ classDef decision fill:#FFFFFF,stroke:#00AAAA,color:#1A1F1F,stroke-width:1.5px,s
 
 - 白底，底边 `1px solid var(--line)`，`position: sticky; top: 0; z-index: 30`
 - 左侧 tabs：`data-view` 属性切换；激活态背景 `var(--grad)`、白字、圆角 8px；非激活 `var(--ink-3)`，hover 背景 `var(--bg-soft)`
-- 右侧编辑工具按钮：`+ 新增节点`（主按钮，`var(--grad)` 底白字）、`撤销`/`重做`（描边按钮，禁用态 40% 透明度）、`自动布局`（清除全部手动拖动偏移）、`导出 Mermaid`、`导出 JSON`、`导入 JSON`（隐藏 `<input type="file">` 触发，FileReader 读入，校验 nodes/edges/phases 后经 `commit()` 整体替换，可撤销）、`重置`（描边按钮，红字用 `#D14545` 仅此一处）
+- 右侧编辑工具按钮：`+ 新增节点`（主按钮，`var(--grad)` 底白字）、`撤销`/`重做`（描边按钮，禁用态 40% 透明度）、`自动布局`（清除全部手动拖动偏移）、`⬇ 下载图片`（`.btn-accent`：主色描边 + 600 字重，与普通描边按钮区分；见第六节）、`导出 Mermaid`、`导出 JSON`、`导入 JSON`（隐藏 `<input type="file">` 触发，FileReader 读入，校验 nodes/edges/phases 后经 `commit()` 整体替换，可撤销）、`重置`（描边按钮，红字用 `#D14545` 仅此一处）
 - 描边按钮样式：白底、`1px solid var(--line-2)`、`var(--ink-2)` 字、hover 边框变 `var(--accent)`
 
 ### 3. Legend bar
@@ -127,14 +127,7 @@ classDef decision fill:#FFFFFF,stroke:#00AAAA,color:#1A1F1F,stroke-width:1.5px,s
 ### 4. Mermaid 视口
 
 - `position: relative; overflow: hidden; cursor: grab`（拖动时 `grabbing`）
-- 24px 网格底纹：
-  ```css
-  background-image:
-    linear-gradient(var(--line) 0.5px, transparent 0.5px),
-    linear-gradient(90deg, var(--line) 0.5px, transparent 0.5px);
-  background-size: 24px 24px;
-  background-color: #FDFFFF;
-  ```
+- **纯色底板，禁止网格/底纹线条**：`background: var(--canvas)`（`--canvas` 默认 `#FFFFFF`）。导出图片用同一个变量取色，保证屏幕所见与图片一致；要换底色只改 `--canvas` 一处
 - 内层 `#stage` 承载 SVG，`transform: translate(tx,ty) scale(s)`，`transform-origin: 0 0`
 - `#stage svg { max-width: none !important; width: auto !important; height: auto !important; }`
 - 缩放控件：**绝对定位在视口左上角**（不是 fixed；右上角会被悬浮抽屉盖住），白底圆角条，含 `[−] [100%] [+] | [⤢ 适应] [⟲ 复位]`，青调阴影
@@ -242,6 +235,20 @@ classDef decision fill:#FFFFFF,stroke:#00AAAA,color:#1A1F1F,stroke-width:1.5px,s
   });
 </script>
 ```
+
+## 六、下载图片（SVG → 高清 PNG）
+
+导出的图片必须反映**用户调整后的最终布局**，所以取的是实时 DOM 里的 SVG（拖动偏移、改过的文字都已经在里面），而不是从数据模型重新画一遍。
+
+`buildFlowPngBlob()` 的流程与三个必须处理的坑：
+
+1. `src.getBBox()` 拿内容真实外接矩形（节点被拖出原 viewBox 也能覆盖）→ 克隆 SVG → 扩 viewBox 留出 padding、标题、图例的空间
+2. **`inlineForeignObjects()`：把 mermaid 的 `<foreignObject>` 换成原生 `<text>/<tspan>`。** mermaid 用 `htmlLabels` 渲染节点文字，而 SVG 作为图片源渲染时 **Firefox / Safari 不渲染 foreignObject**（Chromium 渲染），不转换的话这两个浏览器导出的是没有字的空框。按 `<br/>` 拆行，用 `y = h/2 - (n-1)*lh/2 + size*0.35` 手工算基线（不依赖 `dominant-baseline`，部分渲染器忽略它）
+3. **转出来的 `<text>` 必须用行内样式关掉描边**：mermaid 把 `classDef` 编译成 `.tag > * { stroke: 边框色 !important }`，而 SVG 的 `stroke`/`fill` 会**继承**给子元素——文字会被描一圈边框色，看起来又粗又糊。行内样式优先级高于继承值：`style="stroke:none !important; fill:<字色> !important"`。原来的 foreignObject 是 HTML，不受 SVG stroke 影响，所以这个坑只在转换后才出现
+4. 插入纯色底板 rect（取 `--canvas`）、标题（含青绿标线）、图例（静态图没有交互，色板必须画进图里；按宽度自动换行）
+5. `XMLSerializer` → **`data:` URL**（不要用 `blob:`：data URL 保证 canvas 不被污染，`file://` 直接打开也能导出）→ `Image` → canvas 按 `EXPORT_SCALE`(3×) 绘制，单边超 `EXPORT_MAX_SIDE`(8000px) 自动降倍数 → `toBlob('image/png')`
+
+按钮在导出期间禁用并显示「正在生成…」，失败弹 `alert` 说明原因。
 
 要点回顾：
 

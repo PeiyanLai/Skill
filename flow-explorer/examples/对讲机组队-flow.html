@@ -18,6 +18,7 @@
   --ink-4: #8AABAB;
   --bg: #FFFFFF;
   --bg-soft: #F0FAFA;
+  --canvas: #FFFFFF;   /* 流程图底板纯色（导出图片同色，改这里两处一起变） */
   --line: #D8EEEE;
   --line-2: #B8DEDE;
   --shadow-card: 0 16px 34px -22px rgba(0,60,70,0.15);
@@ -118,6 +119,9 @@ body {
 .btn-primary:hover:not(:disabled) { color: #fff; filter: brightness(1.05); border-color: transparent; }
 .btn-danger { color: #D14545; }
 .btn-danger:hover:not(:disabled) { border-color: #D14545; color: #D14545; }
+/* 下载图片：常用操作，用主色描边与普通按钮区分 */
+.btn-accent { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.btn-accent:hover:not(:disabled) { background: var(--accent-soft); }
 
 /* ---------- Legend ---------- */
 .legend-bar {
@@ -152,11 +156,8 @@ body {
   cursor: grab;
   user-select: none;
   -webkit-user-select: none;
-  background-color: #FDFFFF;
-  background-image:
-    linear-gradient(var(--line) 0.5px, transparent 0.5px),
-    linear-gradient(90deg, var(--line) 0.5px, transparent 0.5px);
-  background-size: 24px 24px;
+  /* 纯色底板：无网格、无线条，与导出图片的底色一致 */
+  background: var(--canvas);
 }
 #viewport.dragging { cursor: grabbing; }
 #stage { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
@@ -411,6 +412,7 @@ body {
     <button id="btn-redo" class="btn" disabled>↷ 重做</button>
     <button id="btn-layout" class="btn" title="清除全部手动拖动，恢复自动排版">自动布局</button>
     <button id="btn-export-mmd" class="btn">导出 Mermaid</button>
+    <button id="btn-png" class="btn btn-accent" title="按当前布局导出高清 PNG 图片">⬇ 下载图片</button>
     <button id="btn-export-json" class="btn">导出 JSON</button>
     <button id="btn-import-json" class="btn">导入 JSON</button>
     <button id="btn-reset" class="btn btn-danger">重置</button>
@@ -1327,7 +1329,7 @@ function renderLegend() {
   $('legend').innerHTML = Object.values(TAGS).map((t) =>
     '<span class="lg-item"><span class="lg-swatch" style="background:' + t.fill +
     ';border-color:' + t.border + '"></span>' + escapeHtml(t.label) + '</span>').join('') +
-    '<span class="lg-hint">单击节点看详情 · 双击直接编辑 · 按住方框拖动位置 · 滚轮缩放 · 空白处拖拽平移 · Esc 收起面板 · Ctrl+Z 撤销</span>';
+    '<span class="lg-hint">单击节点看详情 · 双击直接编辑 · 按住方框拖动位置 · 调整满意后点「下载图片」保存当前布局 · 滚轮缩放 · Ctrl+Z 撤销</span>';
 }
 function updateToolbar() {
   $('btn-undo').disabled = !undoStack.length;
@@ -1362,14 +1364,209 @@ $('z-reset').addEventListener('click', resetZoom);
    导出 / 重置
    ============================================================= */
 function download(name, text, type) {
+  downloadBlob(name, new Blob([text], { type: type || 'text/plain;charset=utf-8' }));
+}
+function downloadBlob(name, blob) {
   const a = document.createElement('a');
-  const blob = new Blob([text], { type: type || 'text/plain;charset=utf-8' });
   a.href = URL.createObjectURL(blob);
   a.download = name;
   document.body.appendChild(a);
   a.click();
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 100);
 }
+
+/* =============================================================
+   下载图片：把当前布局（含手动拖动结果）导出为高清 PNG
+
+   两个关键点：
+   1) mermaid 用 <foreignObject> 承载节点文字，而 SVG 作为图片源渲染时
+      Firefox / Safari 不渲染 foreignObject（导出会变成没字的空框）。
+      因此导出前把每个 foreignObject 换成等位的原生 <text>/<tspan>。
+   2) 用 data: URL 而非 blob: URL 喂给 Image，canvas 不会被污染，
+      file:// 直接打开也能导出。
+   ============================================================= */
+const EXPORT_FONT = "-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif";
+const EXPORT_SCALE = 3;      // 清晰度倍数
+const EXPORT_MAX_SIDE = 8000; // 单边像素上限，超出则自动降倍数
+
+function svgEl(tag, attrs) {
+  const el = document.createElementNS(SVG_NS, tag);
+  Object.entries(attrs || {}).forEach(([k, v]) => el.setAttribute(k, v));
+  return el;
+}
+function measureText(text, font) {
+  const c = measureText._c || (measureText._c = document.createElement('canvas').getContext('2d'));
+  c.font = font;
+  return c.measureText(text).width;
+}
+function plainTitle() {
+  const d = document.createElement('div');
+  d.innerHTML = CONFIG.titleHtml || '';
+  return (d.textContent || '').replace(/\s+/g, ' ').trim();
+}
+
+/* foreignObject → <text>：逐行居中，位置沿用父节点 transform */
+function inlineForeignObjects(srcSvg, cloneSvg) {
+  const srcList = srcSvg.querySelectorAll('foreignObject');
+  const cloneList = cloneSvg.querySelectorAll('foreignObject');
+  for (let i = 0; i < cloneList.length; i++) {
+    const src = srcList[i], fo = cloneList[i];
+    if (!src || !fo.parentNode) continue;
+    const host = src.querySelector('span.nodeLabel') || src.querySelector('span') || src.querySelector('div');
+    const lines = String(host ? host.innerHTML : '')
+      .split(/<br\s*\/?>/i)
+      .map((s) => { const d = document.createElement('div'); d.innerHTML = s; return (d.textContent || '').trim(); })
+      .filter((s) => s.length);
+    if (!lines.length) { fo.parentNode.removeChild(fo); continue; }
+    const cs = host ? getComputedStyle(host) : null;
+    const size = cs ? parseFloat(cs.fontSize) || 14 : 14;
+    const fill = cs ? cs.color : '#1A1F1F';
+    const weight = cs ? cs.fontWeight : '400';
+    const w = parseFloat(fo.getAttribute('width')) || 0;
+    const h = parseFloat(fo.getAttribute('height')) || 0;
+    const x = parseFloat(fo.getAttribute('x')) || 0;
+    const y = parseFloat(fo.getAttribute('y')) || 0;
+    const lh = size * 1.42;
+    // 手工算基线偏移，不依赖 dominant-baseline（部分渲染器忽略该属性）
+    const first = y + h / 2 - ((lines.length - 1) * lh) / 2 + size * 0.35;
+    const text = svgEl('text', {
+      'text-anchor': 'middle', 'font-size': size + 'px',
+      'font-family': EXPORT_FONT, 'font-weight': weight,
+      // mermaid 把 classDef 编译成 `.tag > * { stroke: 边框色 !important }`，
+      // 而 SVG 的 stroke/fill 会继承到子元素——文字会被描边成"粗糊"效果。
+      // 行内样式优先级高于继承值，这里显式关掉描边并锁定字色。
+      style: 'stroke: none !important; fill: ' + fill + ' !important; paint-order: normal;',
+    });
+    lines.forEach((line, idx) => {
+      const ts = svgEl('tspan', { x: x + w / 2, y: first + idx * lh });
+      ts.textContent = line;
+      text.appendChild(ts);
+    });
+    fo.parentNode.replaceChild(text, fo);
+  }
+}
+
+/* 图例：静态图片没有交互，把分类色板画进图里 */
+function appendLegend(svg, x, y, maxW) {
+  const used = [];
+  Object.values(state.nodes).forEach((n) => {
+    const key = TAGS[n.tag] ? n.tag : null;
+    if (key && used.indexOf(key) === -1) used.push(key);
+  });
+  if (!used.length) return 0;
+  const font = '12px ' + EXPORT_FONT;
+  const SW = 13, GAP = 6, ITEM_GAP = 22, ROW_H = 24;
+  const g = svgEl('g', {});
+  let cx = 0, cy = 0;
+  used.forEach((key) => {
+    const t = TAGS[key];
+    const tw = measureText(t.label, font);
+    const itemW = SW + GAP + tw;
+    if (cx > 0 && cx + itemW > maxW) { cx = 0; cy += ROW_H; }
+    g.appendChild(svgEl('rect', {
+      x: x + cx, y: y + cy, width: SW, height: SW, rx: 3.5,
+      fill: t.fill, stroke: t.border, 'stroke-width': 1.4,
+    }));
+    const label = svgEl('text', {
+      x: x + cx + SW + GAP, y: y + cy + SW - 2.5,
+      'font-size': '12px', 'font-family': EXPORT_FONT, fill: '#5C7070',
+    });
+    label.textContent = t.label;
+    g.appendChild(label);
+    cx += itemW + ITEM_GAP;
+  });
+  svg.appendChild(g);
+  return cy + ROW_H;
+}
+
+async function buildFlowPngBlob() {
+  const src = stage.querySelector('svg');
+  if (!src) throw new Error('流程图尚未渲染完成');
+  const bb = src.getBBox();
+  if (!bb.width || !bb.height) throw new Error('流程图内容为空');
+
+  const clone = src.cloneNode(true);
+  clone.removeAttribute('style');
+  clone.setAttribute('xmlns', SVG_NS);
+  clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+  inlineForeignObjects(src, clone);
+
+  const PAD = 34;
+  const title = plainTitle();
+  const titleSize = 19;
+  const titleH = title ? titleSize + 26 : 0;
+  const titleW = title ? measureText(title, '600 ' + titleSize + 'px ' + EXPORT_FONT) : 0;
+  const innerW = Math.max(bb.width, titleW, 420);
+  const legendY = bb.y + bb.height + 30;
+  const legendH = appendLegend(clone, bb.x, legendY, innerW);
+
+  const vbX = bb.x - PAD;
+  const vbY = bb.y - PAD - titleH;
+  const vbW = innerW + PAD * 2;
+  const vbH = titleH + bb.height + (legendH ? legendH + 30 : 0) + PAD * 2;
+  clone.setAttribute('viewBox', vbX + ' ' + vbY + ' ' + vbW + ' ' + vbH);
+  clone.setAttribute('width', vbW);
+  clone.setAttribute('height', vbH);
+
+  // 底板：纯色，与页面视口同色
+  clone.insertBefore(svgEl('rect', {
+    x: vbX, y: vbY, width: vbW, height: vbH,
+    fill: getComputedStyle(document.documentElement).getPropertyValue('--canvas').trim() || '#FFFFFF',
+  }), clone.firstChild);
+
+  if (title) {
+    // 标题上方的青绿标线，与页面头部呼应
+    clone.appendChild(svgEl('rect', {
+      x: bb.x, y: vbY + PAD - 4, width: 46, height: 3, rx: 1.5, fill: '#00bebe',
+    }));
+    const t = svgEl('text', {
+      x: bb.x, y: vbY + PAD + titleSize + 8,
+      'font-size': titleSize + 'px', 'font-family': EXPORT_FONT,
+      'font-weight': '600', fill: '#1A1F1F',
+    });
+    t.textContent = title;
+    clone.appendChild(t);
+  }
+
+  const serialized = new XMLSerializer().serializeToString(clone);
+  const url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(serialized);
+  const img = new Image();
+  await new Promise((resolve, reject) => {
+    img.onload = resolve;
+    img.onerror = () => reject(new Error('SVG 转图片失败'));
+    img.src = url;
+  });
+
+  let scale = Math.min(EXPORT_SCALE, EXPORT_MAX_SIDE / vbW, EXPORT_MAX_SIDE / vbH);
+  scale = Math.max(1, scale);
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(vbW * scale);
+  canvas.height = Math.round(vbH * scale);
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+  return await new Promise((resolve, reject) => {
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('PNG 编码失败'))), 'image/png');
+  });
+}
+
+$('btn-png').addEventListener('click', async () => {
+  const btn = $('btn-png');
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '正在生成…';
+  try {
+    const blob = await buildFlowPngBlob();
+    downloadBlob(CONFIG.exportBaseName + '.png', blob);
+  } catch (err) {
+    alert('图片生成失败：' + (err && err.message ? err.message : err));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+});
 $('btn-export-mmd').addEventListener('click', () =>
   download(CONFIG.exportBaseName + '.mmd', buildMermaid(state)));
 $('btn-export-json').addEventListener('click', () =>
